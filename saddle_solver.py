@@ -29,13 +29,45 @@ def _clip_bounding_points(pts, img_shape, winsize=10):
     a = ~np.any(np.logical_or(pts <= winsize, pts[:, [1, 0]] >= np.array(img_shape) - winsize - 1), axis=1)
     return pts[a, :]
 
-def find_saddle_points(image: np.ndarray, max_pts: int = 0) -> np.ndarray:
+def _filter_x_corners(img, pts, winsize=5):
     """
-    Function to load an image and generate saddle/lattice points.
+    Filters points by examining their symmetry.
+    An internal X-corner is highly symmetric under a 180-degree rotation,
+    while T-corners on the board edge are anti-symmetric because they swap 
+    the board squares with the uniform border.
+    """
+    valid_pts = []
+    h, w = img.shape
+    for pt in pts:
+        x, y = int(pt[0]), int(pt[1])
+        if x - winsize < 0 or x + winsize >= w or y - winsize < 0 or y + winsize >= h:
+            continue
+            
+        patch = img[y - winsize : y + winsize + 1, x - winsize : x + winsize + 1].astype(np.float32)
+        patch_rot = np.rot90(patch, 2)
+        
+        # Calculate Normalized Cross Correlation (NCC)
+        patch_mean = np.mean(patch)
+        patch_rot_mean = np.mean(patch_rot)
+        num = np.sum((patch - patch_mean) * (patch_rot - patch_rot_mean))
+        den = np.sqrt(np.sum((patch - patch_mean)**2) * np.sum((patch_rot - patch_rot_mean)**2))
+        ncc = num / den if den > 0 else 0
+        
+        # Internal X-corners are symmetric (NCC > 0), edge T-corners are anti-symmetric (NCC < 0)
+        # We use a conservative threshold of 0.25 to allow for some perspective distortion
+        if ncc > 0.25:
+            valid_pts.append(pt)
+            
+    return np.array(valid_pts)
+
+def find_saddle_points(image: np.ndarray, max_pts: int = 0, filter_t_corners: bool = True) -> np.ndarray:
+    """
+    Finds saddle points (X-corners) in an image.
     
     Args:
         image (np.ndarray): The input image array.
         max_pts (int): Maximum number of points to return. If 0, return all points.
+        filter_t_corners (bool): If True, filters out T-corners on the edge of the board.
         
     Returns:
         np.ndarray: A 2D array of lattice points of shape (N, 2).
@@ -67,6 +99,10 @@ def find_saddle_points(image: np.ndarray, max_pts: int = 0) -> np.ndarray:
     sorted_indices = np.argsort(saddle_strengths)[::-1]
     spts = spts[sorted_indices]
     
+    # Filter T-corners based on intensity symmetry if requested
+    if filter_t_corners and len(spts) > 0:
+        spts = _filter_x_corners(gray, spts, winsize=5)
+
     # Remove those points near winsize edges
     spts = _clip_bounding_points(spts, gray.shape, winsize)
 
