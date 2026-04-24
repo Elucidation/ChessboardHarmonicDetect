@@ -45,14 +45,13 @@ python usage_example.py --input input_images/3.png --output output_plot.png
 - **Outputs**: 
   - `np.ndarray`: A 2D array of sub-pixel accurate `(x, y)` saddle points of shape `(N, 2)`.
 
-### `estimate_chess_grid(lattice_points: np.ndarray, return_debug: bool = False) -> Tuple`
+### `estimate_chess_grid(lattice_points: np.ndarray) -> Tuple`
 - **Inputs**: 
   - `lattice_points` (np.ndarray): The 2D array of saddle points returned by `find_saddle_points()`.
-  - `return_debug` (bool): If `True`, returns additional internal state for visualization.
 - **Outputs**: 
   - `chess_grid_points` (np.ndarray): Estimated ideal integer chess grid coordinates for each saddle point.
   - `basis_vectors` (np.ndarray): The `2x2` matrix of the estimated lattice basis vectors.
-  - (Optional) `debug_info` (dict): Density map and peak vectors for plotting displacements.
+  - `debug_info` (dict): Density map and peak vectors for plotting displacements.
 
 ### `estimate_homography(lattice_points: np.ndarray, chess_grid_points: np.ndarray) -> np.ndarray`
 - **Inputs**: 

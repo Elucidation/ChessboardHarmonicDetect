@@ -9,8 +9,7 @@ def find_lattice_basis_vectors(
     num_vectors: int = 8,
     displacements: Optional[np.ndarray] = None,
     bins: int = 100,
-    return_debug: bool = False,
-) -> Any:
+) -> Tuple[np.ndarray, dict]:
     if displacements is None:
         displacements = points[:, np.newaxis, :] - points[np.newaxis, :, :]
     flat_dists = displacements.reshape((-1, 2))
@@ -37,13 +36,11 @@ def find_lattice_basis_vectors(
     )
     peak_scores = np.array([density_map[c[0], c[1]] for c in coordinates])
 
-    debug_info = {}
-    if return_debug:
-        debug_info = {
-            'density_map': density_map,
-            'extent': [x_min, x_max, y_min, y_max],
-            'peak_vectors': peak_vectors.copy(),
-        }
+    debug_info = {
+        'density_map': density_map,
+        'extent': [x_min, x_max, y_min, y_max],
+        'peak_vectors': peak_vectors.copy(),
+    }
 
     if len(peak_vectors) > 0:
         origin_idx = np.argmin(np.linalg.norm(peak_vectors, axis=1))
@@ -53,9 +50,7 @@ def find_lattice_basis_vectors(
     harmonic_scores = _calculate_harmonic_scores(peak_vectors, peak_scores)
     final_vectors = _select_best_vectors(peak_vectors, harmonic_scores, num_vectors)
     
-    if return_debug:
-        return _pad_vectors(final_vectors, num_vectors), debug_info
-    return _pad_vectors(final_vectors, num_vectors)
+    return _pad_vectors(final_vectors, num_vectors), debug_info
 
 def _calculate_harmonic_scores(
     peak_vectors: np.ndarray, peak_scores: np.ndarray
@@ -178,62 +173,40 @@ def reproject_points(
 
 def get_lattice_and_reproject(
     points: np.ndarray, num_vectors: int = 2, displacements: Optional[np.ndarray] = None,
-    return_debug: bool = False
-) -> Any:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     assert(len(points.shape) == 2)
     
-    if return_debug:
-        basis_vectors, debug_info = find_lattice_basis_vectors(
-            points, num_vectors=num_vectors, displacements=displacements, return_debug=True
-        )
-    else:
-        basis_vectors = find_lattice_basis_vectors(
-            points, num_vectors=num_vectors, displacements=displacements
-        )
+    basis_vectors, debug_info = find_lattice_basis_vectors(
+        points, num_vectors=num_vectors, displacements=displacements
+    )
 
     angles = np.arctan2(basis_vectors[:, 1], basis_vectors[:, 0])
     basis_vectors = basis_vectors[np.argsort(angles)]
 
     projected_points, center = reproject_points(points, basis_vectors)
 
-    if return_debug:
-        return basis_vectors, projected_points, center, debug_info
-    return basis_vectors, projected_points, center
+    return basis_vectors, projected_points, center, debug_info
 
-def estimate_chess_grid(lattice_points: np.ndarray, return_debug: bool = False) -> Any:
+def estimate_chess_grid(lattice_points: np.ndarray) -> Tuple[np.ndarray, np.ndarray, dict]:
     """
     Estimates the mapping of lattice points to the chess grid.
     
     Args:
         lattice_points (np.ndarray): A 2D array of lattice points of shape (N, 2).
-        return_debug (bool): If True, returns additional debug information.
         
     Returns:
-        If return_debug is False:
-            Tuple[np.ndarray, np.ndarray]: 
-                - Estimated chess grid points of shape (N_grid, 2).
-                - Basis vectors of shape (2, 2).
-        If return_debug is True:
-            Tuple[np.ndarray, np.ndarray, dict]:
-                - Estimated chess grid points of shape (N_grid, 2).
-                - Basis vectors of shape (2, 2).
-                - Debug dictionary containing density map and peaks.
+        Tuple[np.ndarray, np.ndarray, dict]:
+            - Estimated chess grid points of shape (N_grid, 2).
+            - Basis vectors of shape (2, 2).
+            - Debug dictionary containing density map and peaks.
     """
     if len(lattice_points) < 4:
-        if return_debug:
-            return np.zeros_like(lattice_points), np.zeros((2, 2)), {}
-        return np.zeros_like(lattice_points), np.zeros((2, 2))
+        return np.zeros_like(lattice_points), np.zeros((2, 2)), {}
         
-    if return_debug:
-        basis_vectors, projected_points, _, debug_info = get_lattice_and_reproject(
-            lattice_points, num_vectors=2, return_debug=True
-        )
-        return np.round(projected_points), basis_vectors, debug_info
-    else:
-        basis_vectors, projected_points, _ = get_lattice_and_reproject(
-            lattice_points, num_vectors=2
-        )
-        return np.round(projected_points), basis_vectors
+    basis_vectors, projected_points, _, debug_info = get_lattice_and_reproject(
+        lattice_points, num_vectors=2
+    )
+    return np.round(projected_points), basis_vectors, debug_info
 
 def estimate_homography(lattice_points: np.ndarray, chess_grid_points: np.ndarray) -> np.ndarray:
     """

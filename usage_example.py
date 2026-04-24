@@ -31,7 +31,7 @@ def load_and_plot_saddles(image_path: str, img_size: tuple = (640, 480), output_
     
     # 3. Estimate chess grid points (1-2ms)
     t_start = time.time()
-    chess_grid_points, basis_vectors, debug_info = estimate_chess_grid(points, return_debug=True)
+    chess_grid_points, basis_vectors, debug_info = estimate_chess_grid(points)
     t_grid = time.time() - t_start
     print(f"Chess grid estimated in {t_grid*1000:.1f} ms.")
     
