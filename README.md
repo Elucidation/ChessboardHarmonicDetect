@@ -19,11 +19,19 @@ This currently uses only computer vision algorithms, no machine learning. It can
 
 ## Solvers & Performance
 
-We provide three different implementations of the sub-pixel saddle point detection logic to suit different hardware and latency requirements. The implementations are strictly tested to be mathematically consistent.
+There are three different implementations of the sub-pixel saddle point detection logic to suit different hardware and latency requirements. The implementations are strictly tested to be mathematically consistent.
 
 - **CUDA Solver (`solvers/cuda`)**: The fastest raw execution time (~0.5ms). However, it requires an NVIDIA GPU and incurs a one-time ~90ms CUDA context initialization penalty on the first run, this would be the best choice for real-time use cases.
 - **C++ CPU Solver (`solvers/cpp`)**: An OpenMP multi-threaded CPU implementation. It's faster (~6ms) than the Python solver without any initialization overhead.
 - **Python Solver (`solvers/python`)**: The default, highly-portable OpenCV implementation. It runs entirely in Python and takes (~16ms).
+- **WebGPU Solver (`web/`)**: A purely client-side browser implementation that uses custom `WGSL` compute shaders for saddle detection and a JavaScript port of the harmonic solver. It achieves high performance natively in the browser without any server backend.
+
+## Web Application
+
+This is a self-contained HTML web application that runs the entire detection pipeline in your browser client-side using WebGPU for saddle detection and Javascript for the harmonic solver.
+
+- Serve the `web_standalone` folder: `python -m http.server 8000`
+- Open `http://localhost:8000/chessboard_detect.html`
 
 ## Usage
 

@@ -7,6 +7,10 @@ __pycache__/
 *.so
 *.exp
 
+# Ignore base code and build script for web app (for now)
+web/
+docs/*.py
+
 # Distribution / packaging
 .Python
 build/
