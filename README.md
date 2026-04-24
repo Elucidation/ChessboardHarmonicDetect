@@ -1,10 +1,13 @@
 # ChessboardHarmonicDetect
 Detects chessboard poses from images by locating saddle points and using harmonic analysis, runs in ~10 ms on CPU, ~1ms on GPU. 
 
-Here is the output from the example script showing it working.
+Try it yourself with the [Web Demo](https://elucidation.github.io/ChessboardHarmonicDetect/).
 
-![example output](outputs/output_plot_1.png)
+[<img src="docs/live_demo_screenshot.jpg" width="500">](https://elucidation.github.io/ChessboardHarmonicDetect/)
 
+Here is the output from the [`usage_example.py`](usage_example.py) script showing it working.
+
+<img src="outputs/output_plot_1.png" width="500">
 
 I also made a [youtube video](https://youtu.be/ikdNyfMvQsA?si=wtFThdHmDZqxIK-M) explaining how the algorithm works:
 
