@@ -41,7 +41,7 @@ def draw_checkerboard_on_image(image, homography, alpha_blend=0.4) -> np.ndarray
 def visualize_reconstruction(image: np.ndarray, lattice_points: np.ndarray, 
                              chess_grid_points: np.ndarray, homography_matrix: np.ndarray,
                              basis_vectors: np.ndarray, debug_info: dict = None,
-                             output_path: str = None):
+                             output_path: str = None, timing_str: str = ""):
     """
     Visualizes the reconstructed grid on the original image.
     
@@ -56,6 +56,8 @@ def visualize_reconstruction(image: np.ndarray, lattice_points: np.ndarray,
     from skimage.feature import peak_local_max
     
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    if timing_str:
+        fig.suptitle(timing_str, fontsize=16, fontweight='bold')
     axes = axes.ravel()
     
     # 1. Original Image

@@ -1,5 +1,7 @@
 # ChessboardHarmonicDetect
-Detects chessboard poses from images by locating saddle points and using harmonic analysis. Here is the output from the example script showing it working.
+Detects chessboard poses from images by locating saddle points and using harmonic analysis, runs in ~10 ms on CPU, ~1ms on GPU. 
+
+Here is the output from the example script showing it working.
 
 ![example output](outputs/output_plot_1.png)
 
@@ -15,26 +17,44 @@ If you use this code, please cite it as below:
 
 This currently uses only computer vision algorithms, no machine learning. It can be greatly improved with ML to refine the points passed in.
 
+## Solvers & Performance
+
+We provide three different implementations of the sub-pixel saddle point detection logic to suit different hardware and latency requirements. The implementations are strictly tested to be mathematically consistent.
+
+- **CUDA Solver (`solvers/cuda`)**: The fastest raw execution time (~0.5ms). However, it requires an NVIDIA GPU and incurs a one-time ~90ms CUDA context initialization penalty on the first run, this would be the best choice for real-time use cases.
+- **C++ CPU Solver (`solvers/cpp`)**: An OpenMP multi-threaded CPU implementation. It's faster (~6ms) than the Python solver without any initialization overhead.
+- **Python Solver (`solvers/python`)**: The default, highly-portable OpenCV implementation. It runs entirely in Python and takes (~16ms).
+
 ## Usage
 
-Run the usage example to visualize the detection pipeline.
+Run the usage example to visualize the detection pipeline. You can use the `--solver` flag to benchmark the different implementations (`python`, `cpp`, `cuda`, or `all`).
 
-Interactive display:
+Run all solvers and save to default output folders:
 ```bash
 python usage_example.py --input input_images/3.png
 ```
 
-Save to file:
+Save to file using the C++ solver:
 ```bash
-python usage_example.py --input input_images/3.png --output output_plot.png
+python usage_example.py --solver cpp --input input_images/3.png --output outputs/output_plot.png
+```
+
+## Unit Tests
+
+We use `pytest` to ensure that our different solver implementations (Python, C++, and CUDA) remain mathematically consistent and return identical output points.
+
+To run the unit tests:
+```bash
+python -m pytest -v -s tests/test_solvers.py
 ```
 
 ## Files
 
-- **`saddle_solver.py`**: Detects sub-pixel saddle points (X-corners).
+- **`solvers/`**: Directory containing the Python, C++, and CUDA implementations of the sub-pixel saddle point detection (X-corners).
 - **`harmonic_solver.py`**: Estimates the 2D chessboard lattice and homography matrix from saddle points.
 - **`usage_example.py`**: End-to-end usage example with matplotlib visualization.
 - **`utils_visualize.py`**: Some functions to do the example matplotlib overlay.
+- **`tests/test_solvers.py`**: Unit tests validating that solvers produce identical outputs despite precision differences.
 
 ## Important Functions
 

@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 
+# NOTE : This is much slower than it could be, ML-based would be faster, or C++/GPU implementation etc.
+
 def _get_saddle(gray_img):
     img = gray_img
     gx = cv2.Sobel(img, cv2.CV_32F, 1, 0)
