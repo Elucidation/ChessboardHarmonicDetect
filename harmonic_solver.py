@@ -10,10 +10,28 @@ def find_lattice_basis_vectors(
     displacements: Optional[np.ndarray] = None,
     bins: int = 100,
 ) -> Tuple[np.ndarray, dict]:
+    """
+    Finds the most prominent displacement vectors between points using a 2D histogram
+    and peak detection, serving as candidates for lattice basis vectors.
+
+    Args:
+        points (np.ndarray): A 2D array of lattice points of shape (N, 2).
+        num_vectors (int): The number of basis vectors to find (default: 8).
+        displacements (Optional[np.ndarray]): Pre-computed displacements of shape (N, N, 2).
+                                             If None, computed from points.
+        bins (int): The number of bins to use for the 2D histogram (default: 100).
+        
+    Returns:
+        Tuple[np.ndarray, dict]:
+            - basis_vectors (np.ndarray): The estimated lattice basis vectors of shape (num_vectors, 2).
+            - debug_info (dict): A dictionary containing debug information.
+    """
     if displacements is None:
+        # Calculate all pairwise displacements between points
         displacements = points[:, np.newaxis, :] - points[np.newaxis, :, :]
     flat_dists = displacements.reshape((-1, 2))
 
+    # Determine histogram range focusing on the core 60% of displacements to avoid outliers
     x_min, x_max = np.percentile(flat_dists[:, 0], [20, 80])
     y_min, y_max = np.percentile(flat_dists[:, 1], [20, 80])
     hist, x_edges, y_edges = np.histogram2d(
@@ -23,11 +41,15 @@ def find_lattice_basis_vectors(
         range=[[x_min, x_max], [y_min, y_max]],
     )
 
+    # Smooth the histogram to create a continuous density map
     density_map = gaussian_filter(hist.T, sigma=3)
 
+    # Find local maxima in the density map to identify common displacement vectors
     coordinates = peak_local_max(density_map, min_distance=5, threshold_rel=0.01)
     x_bin_width = x_edges[1] - x_edges[0]
     y_bin_width = y_edges[1] - y_edges[0]
+    
+    # Convert peak bin coordinates back to continuous displacement vectors
     peak_vectors = np.array(
         [
             [x_edges[c[1]] + x_bin_width / 2, y_edges[c[0]] + y_bin_width / 2]
@@ -36,17 +58,21 @@ def find_lattice_basis_vectors(
     )
     peak_scores = np.array([density_map[c[0], c[1]] for c in coordinates])
 
+    # NOTE : Returning debug info for visualization purposes, 
+    # adding ~10ms overhead to this function, not needed for the actual solver.
     debug_info = {
         'density_map': density_map,
         'extent': [x_min, x_max, y_min, y_max],
         'peak_vectors': peak_vectors.copy(),
     }
 
+    # Remove the peak at the origin (zero displacement) as it's not a valid basis vector
     if len(peak_vectors) > 0:
         origin_idx = np.argmin(np.linalg.norm(peak_vectors, axis=1))
         peak_vectors = np.delete(peak_vectors, origin_idx, axis=0)
         peak_scores = np.delete(peak_scores, origin_idx, axis=0)
 
+    # Score vectors based on harmonic relationships and select the best ones
     harmonic_scores = _calculate_harmonic_scores(peak_vectors, peak_scores)
     final_vectors = _select_best_vectors(peak_vectors, harmonic_scores, num_vectors)
     
@@ -55,6 +81,17 @@ def find_lattice_basis_vectors(
 def _calculate_harmonic_scores(
     peak_vectors: np.ndarray, peak_scores: np.ndarray
 ) -> np.ndarray:
+    """
+    Scores basis vector candidates by checking for harmonic relationships 
+    (integer multiples of smaller vectors in the same direction).
+
+    Args:
+        peak_vectors (np.ndarray): Candidate basis vectors of shape (N, 2).
+        peak_scores (np.ndarray): Scores for each candidate vector of shape (N,).
+        
+    Returns:
+        np.ndarray: Harmonic scores for each candidate vector of shape (N,).
+    """
     harmonic_scores = peak_scores.copy()
     num_peaks = len(peak_vectors)
     if num_peaks == 0:
@@ -63,26 +100,31 @@ def _calculate_harmonic_scores(
     COS_SIM_THRESH = 0.985
     MAG_RATIO_TOL = 0.15
 
+    # Compute pairwise magnitudes to check for integer multiples
     mags = np.linalg.norm(peak_vectors, axis=1)
     mags_i = mags[:, np.newaxis]
     mags_j = mags[np.newaxis, :]
 
+    # Condition 1: Candidate harmonic vector must be significantly larger
     condition1 = mags_j > mags_i * 1.5
 
+    # Condition 2: Vectors must point in almost the exact same direction (high cosine similarity)
     dot_products = peak_vectors @ peak_vectors.T
     mag_products = mags_i * mags_j
     cos_sim_matrix = dot_products / (mag_products + 1e-9)
     condition2 = cos_sim_matrix > COS_SIM_THRESH
 
+    # Condition 3: The ratio of their magnitudes should be very close to an integer
     mag_ratio_matrix = mags_j / (mags_i + 1e-9)
     k = np.round(mag_ratio_matrix)
     condition3 = np.abs(mag_ratio_matrix - k) < MAG_RATIO_TOL
 
+    # Combine masks to find valid harmonic pairs, ignoring self-comparisons
     identity = np.eye(num_peaks, dtype=bool)
     combined_mask = condition1 & condition2 & condition3 & ~identity
 
+    # Distribute the score of the larger harmonic back to the fundamental vector
     peak_scores_j_broadcast = np.tile(peak_scores[np.newaxis, :], (num_peaks, 1))
-    
     k_safe = np.where(k == 0, 1, k)
     contributions = np.where(combined_mask, peak_scores_j_broadcast / k_safe, 0)
 
@@ -93,6 +135,18 @@ def _calculate_harmonic_scores(
 def _select_best_vectors(
     peak_vectors: np.ndarray, harmonic_scores: np.ndarray, num_vectors: int
 ) -> List[np.ndarray]:
+    """
+    Selects the best non-redundant basis vectors based on harmonic scores,
+    ensuring they are not collinear or overlapping.
+
+    Args:
+        peak_vectors (np.ndarray): Candidate basis vectors of shape (N, 2).
+        harmonic_scores (np.ndarray): Harmonic scores for each candidate vector of shape (N,).
+        num_vectors (int): The number of basis vectors to select (default: 8).
+        
+    Returns:
+        List[np.ndarray]: Selected basis vectors of shape (num_vectors, 2).
+    """
     magnitudes = np.linalg.norm(peak_vectors, axis=1)
     final_metric = harmonic_scores / (magnitudes + 1e-6)
     top_indices = np.argsort(final_metric)[::-1]
@@ -126,6 +180,7 @@ def _select_best_vectors(
     return final_vectors
 
 def _pad_vectors(vectors: List[np.ndarray], target_count: int) -> np.ndarray:
+    """Pads the list of vectors with zeros to reach the target count."""
     output_array = np.array(vectors)
     num_found = len(output_array)
     if num_found < target_count:
@@ -138,29 +193,49 @@ def _pad_vectors(vectors: List[np.ndarray], target_count: int) -> np.ndarray:
 def reproject_points(
     points: np.ndarray, basis_vectors: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Projects points onto the ideal integer lattice defined by the basis vectors
+    and estimates the sub-pixel center offset.
+
+    Args:
+        points (np.ndarray): Input lattice points of shape (N, 2).
+        basis_vectors (np.ndarray): Basis vectors of shape (2, 2).
+        
+    Returns:
+        Tuple[np.ndarray, np.ndarray]:
+            - points_lattice (np.ndarray): Reprojected lattice points of shape (N, 2).
+            - center (np.ndarray): Estimated center offset of shape (2,).
+    """
     if np.linalg.det(basis_vectors) == 0:
         return points, np.mean(points, axis=0)
 
+    # Transform points into the coordinate space defined by the basis vectors
     B_inv = np.linalg.inv(basis_vectors)
     points_lattice = points @ B_inv
 
+    # Remove the mean offset to center the points around the origin temporarily
     points_lattice_offset = points_lattice.mean(axis=0)
     points_lattice -= points_lattice_offset
 
+    # Use a circular mean to robustly estimate the fractional sub-grid offset
     fractional_parts = np.mod(points_lattice, 1)
     angles = 2 * np.pi * fractional_parts
     mean_angle = np.angle(np.mean(np.exp(1j * angles), axis=0))
     points_lattice_frac_offset = np.mod(mean_angle / (2 * np.pi), 1)
     points_lattice -= points_lattice_frac_offset
 
+    # Snap points to nearest integers and remove any remaining global integer offset
     integer_indices = np.round(points_lattice).astype(int)
     integer_offset = np.round(np.mean(integer_indices, axis=0)).astype(int)
     points_lattice -= integer_offset
     integer_indices -= integer_offset
 
+    # Calculate the ideal lattice points and use median difference to find the robust center
     lattice_part = integer_indices @ basis_vectors
     origin_estimates = points - lattice_part
     best_center = np.median(origin_estimates, axis=0)
+    
+    # Map the best center back into lattice space to finalize the zero-centered indices
     best_center_lattice = (
         (best_center @ B_inv)
         - points_lattice_offset
@@ -174,6 +249,23 @@ def reproject_points(
 def get_lattice_and_reproject(
     points: np.ndarray, num_vectors: int = 2, displacements: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    """
+    Finds the 2D lattice basis vectors for the given points and reprojects 
+    the points onto this ideal lattice.
+
+    Args:
+        points (np.ndarray): Input lattice points of shape (N, 2).
+        num_vectors (int): The number of basis vectors to find (default: 8).
+        displacements (Optional[np.ndarray]): Pre-computed displacements of shape (N, N, 2).
+                                             If None, computed from points.
+        
+    Returns:
+        Tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+            - basis_vectors (np.ndarray): The estimated lattice basis vectors of shape (2, 2).
+            - projected_points (np.ndarray): Reprojected lattice points of shape (N, 2).
+            - center (np.ndarray): Estimated center offset of shape (2,).
+            - debug_info (dict): A dictionary containing debug information.
+    """
     assert(len(points.shape) == 2)
     
     basis_vectors, debug_info = find_lattice_basis_vectors(
