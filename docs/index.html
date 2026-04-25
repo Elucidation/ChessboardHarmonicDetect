@@ -6,38 +6,38 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Chessboard Harmonic Detect</title>
   <style>
+    @theme {
+      --font-sans: 'Inter', system-ui, sans-serif;
+      --color-brand: #4f46e5;
+    }
 
+    body {
+      background-color: #0f172a;
+      /* slate-900 */
+      color: #f8fafc;
+      /* slate-50 */
+      font-family: var(--font-sans);
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+    }
 
-@theme {
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --color-brand: #4f46e5;
-}
+    .glass-panel {
+      background: rgba(30, 41, 59, 0.7);
+      /* slate-800 with opacity */
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 1rem;
+    }
 
-body {
-  background-color: #0f172a; /* slate-900 */
-  color: #f8fafc; /* slate-50 */
-  font-family: var(--font-sans);
-  margin: 0;
-  padding: 0;
-  min-height: 100vh;
-}
-
-.glass-panel {
-  background: rgba(30, 41, 59, 0.7); /* slate-800 with opacity */
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 1rem;
-}
-
-.image-pixelated {
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-}
-
-</style>
+    .image-pixelated {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+  </style>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
 
 <body class="bg-slate-900 text-slate-50 min-h-screen p-6 font-sans antialiased">
@@ -111,7 +111,16 @@ body {
           <canvas id="finalCanvas" class="max-w-full max-h-[75vh] object-contain"></canvas>
         </div>
         <div id="gridControls"
-          class="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-slate-800/40 rounded-lg border border-slate-700/50">
+          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4 bg-slate-800/40 rounded-lg border border-slate-700/50">
+          <div class="space-y-2">
+            <div class="flex justify-between items-center">
+              <label for="maxPoints" class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Max
+                Points</label>
+              <span id="maxPointsVal" class="text-xs font-mono text-cyan-400">40</span>
+            </div>
+            <input type="range" id="maxPoints" min="10" max="100" step="1" value="40"
+              class="w-full accent-indigo-500 bg-slate-700 h-1.5 rounded-lg appearance-none cursor-pointer">
+          </div>
           <div class="space-y-2">
             <div class="flex justify-between items-center">
               <label for="offsetX" class="text-xs font-semibold text-slate-400 uppercase tracking-wider">X
@@ -143,7 +152,7 @@ body {
 
   <!-- Main JS Module -->
   <script>
-const saddleWgsl = `struct Uniforms {
+    const saddleWgsl = `struct Uniforms {
   width: u32,
   height: u32,
   threshold: f32,
@@ -175,32 +184,20 @@ fn blur_pass(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
   // 3x3 box blur like cv2.blur(gray, (3,3))
   var sum = 0.0;
+  var count = 0.0;
   for (var dy = -1; dy <= 1; dy++) {
     for (var dx = -1; dx <= 1; dx++) {
-      let cx = clamp(x + dx, 0, i32(u.width) - 1);
-      let cy = clamp(y + dy, 0, i32(u.height) - 1);
-      // texture Load takes vec2<i32> and mip level
-      let color = textureLoad(img_texture, vec2<i32>(cx, cy), 0).rgb;
-      // Convert to grayscale: standard weights or simple mean
-      let gray = dot(color, vec3<f32>(0.299, 0.587, 0.114)) * 255.0; 
-      sum += gray;
+      let nx = x + dx;
+      let ny = y + dy;
+      if (nx >= 0 && nx < i32(u.width) && ny >= 0 && ny < i32(u.height)) {
+        let color = textureLoad(img_texture, vec2<i32>(nx, ny), 0).rgb;
+        let gray = dot(color, vec3<f32>(0.299, 0.587, 0.114)) * 255.0; 
+        sum += gray;
+        count += 1.0;
+      }
     }
   }
-  blur_buf[get_idx(x, y)] = sum / 9.0;
-}
-
-fn sobel_x(buf: ptr<storage, array<f32>, read_write>, x: i32, y: i32) -> f32 {
-  let p00 = buf[get_idx(x-1, y-1)]; let p10 = buf[get_idx(x, y-1)]; let p20 = buf[get_idx(x+1, y-1)];
-  let p01 = buf[get_idx(x-1, y)];   let p11 = buf[get_idx(x, y)];   let p21 = buf[get_idx(x+1, y)];
-  let p02 = buf[get_idx(x-1, y+1)]; let p12 = buf[get_idx(x, y+1)]; let p22 = buf[get_idx(x+1, y+1)];
-  return (p20 - p00) + 2.0 * (p21 - p01) + (p22 - p02);
-}
-
-fn sobel_y(buf: ptr<storage, array<f32>, read_write>, x: i32, y: i32) -> f32 {
-  let p00 = buf[get_idx(x-1, y-1)]; let p10 = buf[get_idx(x, y-1)]; let p20 = buf[get_idx(x+1, y-1)];
-  let p01 = buf[get_idx(x-1, y)];   let p11 = buf[get_idx(x, y)];   let p21 = buf[get_idx(x+1, y)];
-  let p02 = buf[get_idx(x-1, y+1)]; let p12 = buf[get_idx(x, y+1)]; let p22 = buf[get_idx(x+1, y+1)];
-  return (p02 - p00) + 2.0 * (p12 - p10) + (p22 - p20);
+  blur_buf[get_idx(x, y)] = sum / count;
 }
 
 @compute @workgroup_size(16, 16)
@@ -209,8 +206,15 @@ fn grad_pass(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let y = i32(global_id.y);
   if (x >= i32(u.width) || y >= i32(u.height)) { return; }
 
-  let gx = sobel_x(&blur_buf, x, y);
-  let gy = sobel_y(&blur_buf, x, y);
+  // Inline Sobel X
+  let gx = (blur_buf[get_idx(x+1, y-1)] - blur_buf[get_idx(x-1, y-1)]) + 
+           2.0 * (blur_buf[get_idx(x+1, y)] - blur_buf[get_idx(x-1, y)]) + 
+           (blur_buf[get_idx(x+1, y+1)] - blur_buf[get_idx(x-1, y+1)]);
+  
+  // Inline Sobel Y
+  let gy = (blur_buf[get_idx(x-1, y+1)] - blur_buf[get_idx(x-1, y-1)]) + 
+           2.0 * (blur_buf[get_idx(x, y+1)] - blur_buf[get_idx(x, y-1)]) + 
+           (blur_buf[get_idx(x+1, y+1)] - blur_buf[get_idx(x+1, y-1)]);
   
   gx_buf[get_idx(x, y)] = gx;
   gy_buf[get_idx(x, y)] = gy;
@@ -225,9 +229,20 @@ fn saddle_pass(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let gx = gx_buf[get_idx(x, y)];
   let gy = gy_buf[get_idx(x, y)];
   
-  let gxx = sobel_x(&gx_buf, x, y);
-  let gyy = sobel_y(&gy_buf, x, y);
-  let gxy = sobel_y(&gx_buf, x, y); // sobel_y of gx
+  // Inline Sobel X on GX -> GXX
+  let gxx = (gx_buf[get_idx(x+1, y-1)] - gx_buf[get_idx(x-1, y-1)]) + 
+            2.0 * (gx_buf[get_idx(x+1, y)] - gx_buf[get_idx(x-1, y)]) + 
+            (gx_buf[get_idx(x+1, y+1)] - gx_buf[get_idx(x-1, y+1)]);
+
+  // Inline Sobel Y on GY -> GYY
+  let gyy = (gy_buf[get_idx(x-1, y+1)] - gy_buf[get_idx(x-1, y-1)]) + 
+            2.0 * (gy_buf[get_idx(x, y+1)] - gy_buf[get_idx(x, y-1)]) + 
+            (gy_buf[get_idx(x+1, y+1)] - gy_buf[get_idx(x+1, y-1)]);
+
+  // Inline Sobel Y on GX -> GXY
+  let gxy = (gx_buf[get_idx(x-1, y+1)] - gx_buf[get_idx(x-1, y-1)]) + 
+            2.0 * (gx_buf[get_idx(x, y+1)] - gx_buf[get_idx(x, y-1)]) + 
+            (gx_buf[get_idx(x+1, y+1)] - gx_buf[get_idx(x+1, y-1)]);
   
   let S = -gxx * gyy + gxy * gxy;
   saddle_buf[get_idx(x, y)] = S;
@@ -266,7 +281,7 @@ fn nms_pass(@builtin(global_invocation_id) global_id: vec3<u32>) {
     for (var dx = -rad; dx <= rad; dx++) {
       if (dx == 0 && dy == 0) { continue; }
       let neighbor = saddle_buf[get_idx(x + dx, y + dy)];
-      if (neighbor >= val) {
+      if (neighbor > val) { // Matching C++ strict inequality
         is_max = false;
         break;
       }
@@ -285,1300 +300,1327 @@ fn nms_pass(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
   }
 }
+
+
 `;
 
-// --- FILE: C:\Users\eluci\Documents\GitHub\ChessboardHarmonicDetect\web/src/mathUtils.js ---
-function norm(v) {
-  return Math.sqrt(v[0] * v[0] + v[1] * v[1]);
-}
-
-function dot(v1, v2) {
-  return v1[0] * v2[0] + v1[1] * v2[1];
-}
-
-function det2x2(m) {
-  return m[0][0] * m[1][1] - m[0][1] * m[1][0];
-}
-
-function inv2x2(m) {
-  const d = det2x2(m);
-  if (Math.abs(d) < 1e-10) return null;
-  return [
-    [m[1][1] / d, -m[0][1] / d],
-    [-m[1][0] / d, m[0][0] / d]
-  ];
-}
-
-// m: 2x2, v: 1x2 (or vector) -> returns v @ m 
-// Python points @ B_inv does exactly [v0, v1] @ [[m00, m01], [m10, m11]] 
-// = [v0*m00 + v1*m10, v0*m01 + v1*m11]
-function vecMatMul(v, m) {
-  return [
-    v[0] * m[0][0] + v[1] * m[1][0],
-    v[0] * m[0][1] + v[1] * m[1][1]
-  ];
-}
-
-function matVecMul(m, v) {
-  return [
-    m[0][0] * v[0] + m[0][1] * v[1],
-    m[1][0] * v[0] + m[1][1] * v[1]
-  ];
-}
-
-function meanPoints(pts) {
-  if (pts.length === 0) return [0, 0];
-  let sumX = 0, sumY = 0;
-  for (const p of pts) { sumX += p[0]; sumY += p[1]; }
-  return [sumX / pts.length, sumY / pts.length];
-}
-
-function medianPoints(pts) {
-  if (pts.length === 0) return [0, 0];
-  const xs = pts.map(p => p[0]).sort((a, b) => a - b);
-  const ys = pts.map(p => p[1]).sort((a, b) => a - b);
-  const mid = Math.floor(pts.length / 2);
-  return [xs[mid], ys[mid]]; // simplified median
-}
-
-// Separable 2D Gaussian filter
-function gaussianFilter2D(map, width, height, sigma = 3) {
-  const radius = Math.ceil(4 * sigma);
-  const size = radius * 2 + 1;
-  const kernel = new Float32Array(size);
-  let sum = 0;
-  for (let i = -radius; i <= radius; i++) {
-    const val = Math.exp(-(i * i) / (2 * sigma * sigma));
-    kernel[i + radius] = val;
-    sum += val;
-  }
-  for (let i = 0; i < size; i++) kernel[i] /= sum;
-
-  const temp = new Float32Array(width * height);
-  const out = new Float32Array(width * height);
-
-  // Horizontal pass
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let v = 0;
-      for (let i = -radius; i <= radius; i++) {
-        const nx = Math.max(0, Math.min(width - 1, x + i));
-        v += map[y * width + nx] * kernel[i + radius];
-      }
-      temp[y * width + x] = v;
-    }
-  }
-
-  // Vertical pass
-  for (let x = 0; x < width; x++) {
-    for (let y = 0; y < height; y++) {
-      let v = 0;
-      for (let i = -radius; i <= radius; i++) {
-        const ny = Math.max(0, Math.min(height - 1, y + i));
-        v += temp[ny * width + x] * kernel[i + radius];
-      }
-      out[y * width + x] = v;
-    }
-  }
-
-  return out;
-}
-
-// Peak local max
-function peakLocalMax(map, width, height, min_distance=5, threshold_rel=0.01) {
-  let maxVal = 0;
-  for (let i = 0; i < map.length; i++) {
-    if (map[i] > maxVal) maxVal = map[i];
-  }
-  const threshold = maxVal * threshold_rel;
-  
-  const peaks = [];
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
-      const val = map[y * width + x];
-      if (val < threshold) continue;
-      
-      let isMax = true;
-      for (let dy = -min_distance; dy <= min_distance; dy++) {
-        for (let dx = -min_distance; dx <= min_distance; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          const ny = y + dy;
-          const nx = x + dx;
-          if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
-            if (map[ny * width + nx] >= val) {
-              isMax = false;
-              break;
-            }
-          }
-        }
-        if (!isMax) break;
-      }
-      
-      if (isMax) {
-        peaks.push({x, y, val});
-      }
-    }
-  }
-  return peaks;
-}
-
-// SVD and DLT for Homography with Hartley Normalization
-function findHomography(srcPts, dstPts) {
-  if (srcPts.length < 4) return [ [1,0,0], [0,1,0], [0,0,1] ];
-  
-  // Hartley normalization
-  function normalize(pts) {
-    let mx = 0, my = 0;
-    for (const p of pts) { mx += p[0]; my += p[1]; }
-    mx /= pts.length; my /= pts.length;
-    
-    let distSum = 0;
-    for (const p of pts) {
-      const dx = p[0] - mx;
-      const dy = p[1] - my;
-      distSum += Math.sqrt(dx*dx + dy*dy);
-    }
-    const scale = Math.sqrt(2) / (distSum / pts.length || 1);
-    
-    const T = [
-      [scale, 0, -scale * mx],
-      [0, scale, -scale * my],
-      [0, 0, 1]
-    ];
-    
-    const normPts = pts.map(p => [
-      (p[0] - mx) * scale,
-      (p[1] - my) * scale
-    ]);
-    return { T, normPts };
-  }
-  
-  const normSrc = normalize(srcPts);
-  const normDst = normalize(dstPts);
-  
-  const A2 = [];
-  const B = [];
-  for (let i = 0; i < srcPts.length; i++) {
-    const u = normSrc.normPts[i][0], v = normSrc.normPts[i][1];
-    const x = normDst.normPts[i][0], y = normDst.normPts[i][1];
-    A2.push([u, v, 1, 0, 0, 0, -u*x, -v*x]);
-    B.push(x);
-    A2.push([0, 0, 0, u, v, 1, -u*y, -v*y]);
-    B.push(y);
-  }
-  
-  const At = transpose(A2);
-  const AtA = matMult(At, A2);
-  const AtB = matMult(At, B.map(val => [val]));
-  
-  const h = solveLinearSystem(AtA, AtB);
-  if (!h) return [ [1,0,0], [0,1,0], [0,0,1] ];
-  
-  const H_norm = [
-    [h[0][0], h[1][0], h[2][0]],
-    [h[3][0], h[4][0], h[5][0]],
-    [h[6][0], h[7][0], 1]
-  ];
-  
-  // Denormalize: H = T_dst^-1 * H_norm * T_src
-  // T_dst is diag(s, s, 1) with translation. Its inverse is:
-  const invT_dst = [
-    [1/normDst.T[0][0], 0, -normDst.T[0][2]/normDst.T[0][0]],
-    [0, 1/normDst.T[1][1], -normDst.T[1][2]/normDst.T[1][1]],
-    [0, 0, 1]
-  ];
-  
-  const H_inter = matMult3x3(invT_dst, H_norm);
-  const H_final = matMult3x3(H_inter, normSrc.T);
-  
-  // Normalize so H_final[2][2] = 1
-  const scale = H_final[2][2] || 1;
-  return H_final.map(row => row.map(val => val / scale));
-}
-
-// RANSAC Homography
-function findHomographyRANSAC(srcPts, dstPts, maxIters = 200, inlierThreshold = 5.0) {
-  if (srcPts.length < 4) return findHomography(srcPts, dstPts);
-
-  let bestInliers = [];
-  let bestH = null;
-
-  // Use a simple LCG for deterministic results
-  let seed = 12345;
-  const seededRandom = () => {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-    return seed / 0x80000000;
-  };
-
-  for (let iter = 0; iter < maxIters; iter++) {
-    // Randomly pick 4 indices
-    const sampleIdx = [];
-    while (sampleIdx.length < 4) {
-      const idx = Math.floor(seededRandom() * srcPts.length);
-      if (!sampleIdx.includes(idx)) sampleIdx.push(idx);
+    // --- FILE: C:\Users\eluci\Documents\GitHub\ChessboardHarmonicDetect\web/src/mathUtils.js ---
+    function norm(v) {
+      return Math.sqrt(v[0] * v[0] + v[1] * v[1]);
     }
 
-    const sampleSrc = sampleIdx.map(i => srcPts[i]);
-    const sampleDst = sampleIdx.map(i => dstPts[i]);
-
-    const H = findHomography(sampleSrc, sampleDst);
-    if (!H || H[2][2] !== 1) continue; // Invalid homography
-
-    const currentInliers = [];
-    for (let i = 0; i < srcPts.length; i++) {
-      const u = srcPts[i][0];
-      const v = srcPts[i][1];
-      const w = H[2][0] * u + H[2][1] * v + H[2][2];
-      if (Math.abs(w) < 1e-6) continue;
-
-      const px = (H[0][0] * u + H[0][1] * v + H[0][2]) / w;
-      const py = (H[1][0] * u + H[1][1] * v + H[1][2]) / w;
-
-      const dx = px - dstPts[i][0];
-      const dy = py - dstPts[i][1];
-      const err = Math.sqrt(dx * dx + dy * dy);
-
-      if (err < inlierThreshold) {
-        currentInliers.push(i);
-      }
+    function dot(v1, v2) {
+      return v1[0] * v2[0] + v1[1] * v2[1];
     }
 
-    if (currentInliers.length > bestInliers.length) {
-      bestInliers = currentInliers;
-      bestH = H;
-    }
-  }
-
-  if (bestInliers.length >= 4) {
-    const inlierSrc = bestInliers.map(i => srcPts[i]);
-    const inlierDst = bestInliers.map(i => dstPts[i]);
-    return findHomography(inlierSrc, inlierDst); // Refine with all inliers
-  }
-
-  return bestH || findHomography(srcPts, dstPts);
-}
-
-function matMult3x3(a, b) {
-  const out = [[0,0,0],[0,0,0],[0,0,0]];
-  for(let i=0; i<3; i++) {
-    for(let j=0; j<3; j++) {
-      out[i][j] = a[i][0]*b[0][j] + a[i][1]*b[1][j] + a[i][2]*b[2][j];
-    }
-  }
-  return out;
-}
-
-function transpose(m) {
-  const r = m.length, c = m[0].length;
-  const out = [];
-  for (let j = 0; j < c; j++) {
-    out[j] = [];
-    for (let i = 0; i < r; i++) {
-      out[j][i] = m[i][j];
-    }
-  }
-  return out;
-}
-
-function matMult(a, b) {
-  const r1 = a.length, c1 = a[0].length, c2 = b[0].length;
-  const out = Array.from({length: r1}, () => new Array(c2).fill(0));
-  for (let i = 0; i < r1; i++) {
-    for (let j = 0; j < c2; j++) {
-      for (let k = 0; k < c1; k++) {
-        out[i][j] += a[i][k] * b[k][j];
-      }
-    }
-  }
-  return out;
-}
-
-function solveLinearSystem(A, B) {
-  // Gaussian elimination
-  const n = A.length;
-  // Augment A with B
-  const aug = A.map((row, i) => [...row, B[i][0]]);
-  
-  for (let i = 0; i < n; i++) {
-    let pivot = i;
-    for (let j = i + 1; j < n; j++) {
-      if (Math.abs(aug[j][i]) > Math.abs(aug[pivot][i])) pivot = j;
-    }
-    if (Math.abs(aug[pivot][i]) < 1e-10) return null; // singular
-    
-    const temp = aug[i];
-    aug[i] = aug[pivot];
-    aug[pivot] = temp;
-    
-    for (let j = i + 1; j < n; j++) {
-      const factor = aug[j][i] / aug[i][i];
-      for (let k = i; k <= n; k++) {
-        aug[j][k] -= factor * aug[i][k];
-      }
-    }
-  }
-  
-  const x = Array(n).fill(0).map(() => [0]);
-  for (let i = n - 1; i >= 0; i--) {
-    let sum = 0;
-    for (let j = i + 1; j < n; j++) {
-      sum += aug[i][j] * x[j][0];
-    }
-    x[i][0] = (aug[i][n] - sum) / aug[i][i];
-  }
-  return x;
-}
-
-
-// --- FILE: C:\Users\eluci\Documents\GitHub\ChessboardHarmonicDetect\web/src/harmonicSolver.js ---
-
-
-function findLatticeBasisVectors(points, numVectors = 8, bins = 100) {
-  const numPts = points.length;
-  if (numPts < 2) return { basisVectors: [], debugInfo: {} };
-
-  const numDists = numPts * (numPts - 1);
-  const xs = new Float32Array(numDists);
-  const ys = new Float32Array(numDists);
-  let idx = 0;
-
-  for (let i = 0; i < numPts; i++) {
-    for (let j = 0; j < numPts; j++) {
-      if (i === j) continue;
-      xs[idx] = points[i][0] - points[j][0];
-      ys[idx] = points[i][1] - points[j][1];
-      idx++;
-    }
-  }
-
-  // Determine histogram range (core 60%)
-  const xsSorted = new Float32Array(xs);
-  xsSorted.sort();
-  const ysSorted = new Float32Array(ys);
-  ysSorted.sort();
-
-  const x_min = xsSorted[Math.floor(numDists * 0.2)];
-  const x_max = xsSorted[Math.floor(numDists * 0.8)];
-  const y_min = ysSorted[Math.floor(numDists * 0.2)];
-  const y_max = ysSorted[Math.floor(numDists * 0.8)];
-
-  // 2D Histogram
-  const hist = new Float32Array(bins * bins);
-  const x_bin_width = (x_max - x_min) / bins;
-  const y_bin_width = (y_max - y_min) / bins;
-
-  for (let i = 0; i < numDists; i++) {
-    const bx = Math.floor((xs[i] - x_min) / x_bin_width);
-    const by = Math.floor((ys[i] - y_min) / y_bin_width);
-    if (bx >= 0 && bx < bins && by >= 0 && by < bins) {
-      hist[by * bins + bx] += 1; // row-major (y * width + x)
-    }
-  }
-
-  // Smooth density map
-  const densityMap = gaussianFilter2D(hist, bins, bins);
-
-  // Peak detection
-  const coordinates = peakLocalMax(densityMap, bins, bins, 5, 0.01);
-  
-  let peakVectors = [];
-  let peakScores = [];
-  for (const c of coordinates) {
-    const px = x_min + (c.x + 0.5) * x_bin_width;
-    const py = y_min + (c.y + 0.5) * y_bin_width;
-    peakVectors.push([px, py]);
-    peakScores.push(c.val);
-  }
-
-  // Remove origin peak
-  let minNormIdx = -1;
-  let minNorm = Infinity;
-  for (let i = 0; i < peakVectors.length; i++) {
-    const n = norm(peakVectors[i]);
-    if (n < minNorm) {
-      minNorm = n;
-      minNormIdx = i;
-    }
-  }
-  if (minNormIdx !== -1 && minNorm < Math.max(x_bin_width, y_bin_width) * 2) {
-    peakVectors.splice(minNormIdx, 1);
-    peakScores.splice(minNormIdx, 1);
-  }
-
-  const harmonicScores = calculateHarmonicScores(peakVectors, peakScores);
-  let finalVectors = selectBestVectors(peakVectors, harmonicScores, numVectors);
-
-  const debugInfo = {
-    densityMap: Array.from(densityMap), // for drawing
-    extent: [x_min, x_max, y_min, y_max],
-    bins,
-    peakVectors: JSON.parse(JSON.stringify(peakVectors)),
-    basisVectors: JSON.parse(JSON.stringify(finalVectors))
-  };
-
-  // Pad to target count if necessary
-  while (finalVectors.length < numVectors) {
-    finalVectors.push([0, 0]);
-  }
-
-  return { basisVectors: finalVectors, debugInfo };
-}
-
-function calculateHarmonicScores(peakVectors, peakScores) {
-  const harmonicScores = [...peakScores];
-  const numPeaks = peakVectors.length;
-  const COS_SIM_THRESH = 0.985;
-  const MAG_RATIO_TOL = 0.15;
-
-  const mags = peakVectors.map(norm);
-
-  for (let j = 0; j < numPeaks; j++) {
-    for (let i = 0; i < numPeaks; i++) {
-      if (i === j) continue;
-      
-      const mag_i = mags[i] + 1e-9;
-      const mag_j = mags[j];
-
-      if (mag_j > mag_i * 1.5) {
-        const dotProd = dot(peakVectors[i], peakVectors[j]);
-        const cos_sim = dotProd / (mag_i * mag_j);
-        
-        if (cos_sim > COS_SIM_THRESH) {
-          const mag_ratio = mag_j / mag_i;
-          const k = Math.round(mag_ratio);
-          
-          if (Math.abs(mag_ratio - k) < MAG_RATIO_TOL) {
-            const k_safe = k === 0 ? 1 : k;
-            harmonicScores[i] += peakScores[j] / k_safe;
-          }
-        }
-      }
-    }
-  }
-  return harmonicScores;
-}
-
-function selectBestVectors(peakVectors, harmonicScores, numVectors) {
-  const metrics = peakVectors.map((v, i) => ({
-    metric: harmonicScores[i] / (norm(v) + 1e-6),
-    vec: v,
-    idx: i
-  }));
-  
-  metrics.sort((a, b) => b.metric - a.metric);
-  
-  const finalVectors = [];
-  const COS_SIM_THRESH = 0.985;
-
-  for (const item of metrics) {
-    if (finalVectors.length >= numVectors) break;
-    
-    let candidate = [...item.vec];
-    if (candidate[0] < -1e-6) {
-      candidate = [-candidate[0], -candidate[1]];
-    } else if (Math.abs(candidate[0]) < 1e-6 && candidate[1] < -1e-6) {
-      candidate = [-candidate[0], -candidate[1]];
+    function det2x2(m) {
+      return m[0][0] * m[1][1] - m[0][1] * m[1][0];
     }
 
-    let isRedundant = false;
-    for (const existing of finalVectors) {
-      const normProd = norm(candidate) * norm(existing);
-      if (normProd > 1e-6) {
-        const cosSim = dot(candidate, existing) / normProd;
-        if (Math.abs(cosSim) > COS_SIM_THRESH) {
-          isRedundant = true;
-          break;
-        }
-      }
+    function inv2x2(m) {
+      const d = det2x2(m);
+      if (Math.abs(d) < 1e-10) return null;
+      return [
+        [m[1][1] / d, -m[0][1] / d],
+        [-m[1][0] / d, m[0][0] / d]
+      ];
     }
 
-    if (!isRedundant) {
-      finalVectors.push(candidate);
-    }
-  }
-  return finalVectors;
-}
-
-function reprojectPoints(points, basisVectors) {
-  const det = det2x2(basisVectors);
-  if (Math.abs(det) < 1e-10) {
-    return { pointsLattice: points, center: meanPoints(points) };
-  }
-
-  const B_inv = inv2x2(basisVectors);
-  const pointsLattice = points.map(p => vecMatMul(p, B_inv));
-
-  const pointsLatticeOffset = meanPoints(pointsLattice);
-  for (let i = 0; i < pointsLattice.length; i++) {
-    pointsLattice[i][0] -= pointsLatticeOffset[0];
-    pointsLattice[i][1] -= pointsLatticeOffset[1];
-  }
-
-  // Circular mean for sub-grid offset
-  let sumSin = 0, sumCos = 0;
-  for (let i = 0; i < pointsLattice.length; i++) {
-    // Treat as complex number (combining both components isn't strictly right, python code applies mod 1 then angles)
-    // fractional parts
-    const fracX = ((pointsLattice[i][0] % 1) + 1) % 1;
-    const fracY = ((pointsLattice[i][1] % 1) + 1) % 1;
-    // Actually, circular mean is per component or applied via complex? 
-    // Python: fractional_parts = np.mod(points_lattice, 1) ... mean_angle = np.angle(np.mean(np.exp(1j * angles), axis=0))
-    // We do it per axis:
-  }
-  // Wait, let's do it per axis:
-  const offsetFrac = [0, 0];
-  for(let axis=0; axis<2; axis++) {
-    let s = 0, c = 0;
-    for(let i=0; i<pointsLattice.length; i++) {
-      const frac = ((pointsLattice[i][axis] % 1) + 1) % 1;
-      const angle = 2 * Math.PI * frac;
-      s += Math.sin(angle);
-      c += Math.cos(angle);
-    }
-    const meanAngle = Math.atan2(s / pointsLattice.length, c / pointsLattice.length);
-    let val = meanAngle / (2 * Math.PI);
-    val = ((val % 1) + 1) % 1; // mod 1
-    offsetFrac[axis] = val;
-  }
-
-  for (let i = 0; i < pointsLattice.length; i++) {
-    pointsLattice[i][0] -= offsetFrac[0];
-    pointsLattice[i][1] -= offsetFrac[1];
-  }
-
-  const integerIndices = pointsLattice.map(p => [Math.round(p[0]), Math.round(p[1])]);
-  const integerOffset = meanPoints(integerIndices).map(Math.round);
-
-  for (let i = 0; i < pointsLattice.length; i++) {
-    pointsLattice[i][0] -= integerOffset[0];
-    pointsLattice[i][1] -= integerOffset[1];
-    integerIndices[i][0] -= integerOffset[0];
-    integerIndices[i][1] -= integerOffset[1];
-  }
-
-  const originEstimates = [];
-  for (let i = 0; i < points.length; i++) {
-    const latPart = vecMatMul(integerIndices[i], basisVectors);
-    originEstimates.push([points[i][0] - latPart[0], points[i][1] - latPart[1]]);
-  }
-
-  const bestCenter = medianPoints(originEstimates);
-
-  // Mapping best center back into lattice space
-  const bcl_raw = vecMatMul(bestCenter, B_inv);
-  const bestCenterLattice = [
-    bcl_raw[0] - pointsLatticeOffset[0] - offsetFrac[0] - integerOffset[0],
-    bcl_raw[1] - pointsLatticeOffset[1] - offsetFrac[1] - integerOffset[1]
-  ];
-
-  for (let i = 0; i < pointsLattice.length; i++) {
-    pointsLattice[i][0] -= bestCenterLattice[0];
-    pointsLattice[i][1] -= bestCenterLattice[1];
-  }
-
-  return { pointsLattice, center: bestCenter };
-}
-
-function getLatticeAndReproject(points, numVectors = 2) {
-  const { basisVectors, debugInfo } = findLatticeBasisVectors(points, numVectors);
-  
-  if (basisVectors.length < 2) return { basisVectors: [], projectedPoints: [], center: [0,0], debugInfo };
-
-  // Sort basis vectors by angle
-  basisVectors.sort((a, b) => Math.atan2(a[1], a[0]) - Math.atan2(b[1], b[0]));
-
-  const { pointsLattice, center } = reprojectPoints(points, basisVectors);
-  return { basisVectors, projectedPoints: pointsLattice, center, debugInfo };
-}
-
-function estimateChessGrid(latticePoints) {
-  if (latticePoints.length < 4) {
-    return { chessGridPoints: [], basisVectors: [], debugInfo: {} };
-  }
-  const { basisVectors, projectedPoints, center, debugInfo } = getLatticeAndReproject(latticePoints, 2);
-  const chessGridPoints = projectedPoints.map(p => [Math.round(p[0]), Math.round(p[1])]);
-  return { chessGridPoints, basisVectors, debugInfo };
-}
-
-function estimateHomography(latticePoints, chessGridPoints) {
-  return findHomographyRANSAC(chessGridPoints, latticePoints, 1000, 3.0);
-}
-
-
-// --- FILE: C:\Users\eluci\Documents\GitHub\ChessboardHarmonicDetect\web/src/saddleSolver.js ---
-
-
-class SaddleSolver {
-  constructor() {
-    this.device = null;
-    this.pipelineBlur = null;
-    this.pipelineGrad = null;
-    this.pipelineSaddle = null;
-    this.pipelineNMS = null;
-  }
-
-  async init() {
-    if (!navigator.gpu) {
-      throw new Error("WebGPU not supported on this browser.");
-    }
-    const adapter = await navigator.gpu.requestAdapter();
-    if (!adapter) {
-      throw new Error("No appropriate GPUAdapter found.");
-    }
-    this.device = await adapter.requestDevice();
-
-    const module = this.device.createShaderModule({
-      label: 'Saddle Shader',
-      code: saddleWgsl,
-    });
-
-    const bgl = this.device.createBindGroupLayout({
-      entries: [
-        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
-        { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
-        { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-        { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-        { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-        { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-        { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-        { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-        { binding: 9, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-        { binding: 10, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-      ]
-    });
-    this.bgl = bgl;
-    const layout = this.device.createPipelineLayout({ bindGroupLayouts: [bgl] });
-
-    this.pipelineBlur = this.device.createComputePipeline({
-      layout: layout,
-      compute: { module, entryPoint: 'blur_pass' },
-    });
-    this.pipelineGrad = this.device.createComputePipeline({
-      layout: layout,
-      compute: { module, entryPoint: 'grad_pass' },
-    });
-    this.pipelineSaddle = this.device.createComputePipeline({
-      layout: layout,
-      compute: { module, entryPoint: 'saddle_pass' },
-    });
-    this.pipelineNMS = this.device.createComputePipeline({
-      layout: layout,
-      compute: { module, entryPoint: 'nms_pass' },
-    });
-  }
-
-  async findSaddlePoints(imageData, threshold = 1000) {
-    if (!this.device) await this.init();
-
-    const width = imageData.width;
-    const height = imageData.height;
-    const numPixels = width * height;
-
-    // 1. Create Image Texture
-    const texture = this.device.createTexture({
-      size: [width, height, 1],
-      format: 'rgba8unorm',
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-    });
-    this.device.queue.writeTexture(
-      { texture },
-      imageData.data,
-      { bytesPerRow: width * 4, rowsPerImage: height },
-      [width, height, 1]
-    );
-
-    // 2. Create buffers
-    const bufferSize = numPixels * 4; // f32
-    const createBuffer = () => this.device.createBuffer({
-      size: bufferSize,
-      usage: GPUBufferUsage.STORAGE,
-    });
-
-    const blurBuf = createBuffer();
-    const gxBuf = createBuffer();
-    const gyBuf = createBuffer();
-    const saddleBuf = createBuffer();
-    const subsBuf = createBuffer();
-    const subtBuf = createBuffer();
-
-    // Uniforms
-    const uniformArray = new Float32Array([
-      width, height, threshold, 10
-    ]);
-    // Width and height as u32
-    const uniformU32 = new Uint32Array(uniformArray.buffer);
-    uniformU32[0] = width;
-    uniformU32[1] = height;
-    uniformU32[3] = 10; // winsize
-
-    const uniformBuf = this.device.createBuffer({
-      size: 16,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.device.queue.writeBuffer(uniformBuf, 0, uniformArray);
-
-    // Output buffer
-    const maxPoints = 5000;
-    const pointsBuf = this.device.createBuffer({
-      size: maxPoints * 5 * 4, // 5 floats per point
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    });
-    const counterBuf = this.device.createBuffer({
-      size: 4,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-    });
-    this.device.queue.writeBuffer(counterBuf, 0, new Uint32Array([0]));
-
-    // Readback buffer
-    const readbackBuf = this.device.createBuffer({
-      size: maxPoints * 5 * 4 + 4, // counter + points
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    });
-
-    // Bind Group
-    const bindGroup = this.device.createBindGroup({
-      layout: this.bgl,
-      entries: [
-        { binding: 0, resource: { buffer: uniformBuf } },
-        { binding: 2, resource: texture.createView() },
-        { binding: 3, resource: { buffer: blurBuf } },
-        { binding: 4, resource: { buffer: gxBuf } },
-        { binding: 5, resource: { buffer: gyBuf } },
-        { binding: 6, resource: { buffer: saddleBuf } },
-        { binding: 7, resource: { buffer: subsBuf } },
-        { binding: 8, resource: { buffer: subtBuf } },
-        { binding: 9, resource: { buffer: counterBuf } },
-        { binding: 10, resource: { buffer: pointsBuf } },
-      ],
-    });
-
-    // Dispatch
-    const commandEncoder = this.device.createCommandEncoder();
-    const workgroupCountX = Math.ceil(width / 16);
-    const workgroupCountY = Math.ceil(height / 16);
-
-    const pass1 = commandEncoder.beginComputePass();
-    pass1.setPipeline(this.pipelineBlur);
-    pass1.setBindGroup(0, bindGroup);
-    pass1.dispatchWorkgroups(workgroupCountX, workgroupCountY);
-    pass1.end();
-
-    const pass2 = commandEncoder.beginComputePass();
-    pass2.setPipeline(this.pipelineGrad);
-    pass2.setBindGroup(0, bindGroup);
-    pass2.dispatchWorkgroups(workgroupCountX, workgroupCountY);
-    pass2.end();
-
-    const pass3 = commandEncoder.beginComputePass();
-    pass3.setPipeline(this.pipelineSaddle);
-    pass3.setBindGroup(0, bindGroup);
-    pass3.dispatchWorkgroups(workgroupCountX, workgroupCountY);
-    pass3.end();
-
-    const pass4 = commandEncoder.beginComputePass();
-    pass4.setPipeline(this.pipelineNMS);
-    pass4.setBindGroup(0, bindGroup);
-    pass4.dispatchWorkgroups(workgroupCountX, workgroupCountY);
-    pass4.end();
-
-    // Copy results
-    commandEncoder.copyBufferToBuffer(counterBuf, 0, readbackBuf, 0, 4);
-    commandEncoder.copyBufferToBuffer(pointsBuf, 0, readbackBuf, 4, maxPoints * 5 * 4);
-
-    this.device.queue.submit([commandEncoder.finish()]);
-
-    // Read back
-    await readbackBuf.mapAsync(GPUMapMode.READ);
-    const arrayBuffer = readbackBuf.getMappedRange();
-    const count = Math.min(new Uint32Array(arrayBuffer)[0], maxPoints);
-    const pointsData = new Float32Array(arrayBuffer, 4, count * 5);
-
-    // Parse points and sort by score
-    const points = [];
-    for (let i = 0; i < count; i++) {
-      points.push({
-        x: pointsData[i * 5 + 0] + pointsData[i * 5 + 2],
-        y: pointsData[i * 5 + 1] + pointsData[i * 5 + 3],
-        score: pointsData[i * 5 + 4]
-      });
+    // m: 2x2, v: 1x2 (or vector) -> returns v @ m 
+    // Python points @ B_inv does exactly [v0, v1] @ [[m00, m01], [m10, m11]] 
+    // = [v0*m00 + v1*m10, v0*m01 + v1*m11]
+    function vecMatMul(v, m) {
+      return [
+        v[0] * m[0][0] + v[1] * m[1][0],
+        v[0] * m[0][1] + v[1] * m[1][1]
+      ];
     }
 
-    readbackBuf.unmap();
+    function matVecMul(m, v) {
+      return [
+        m[0][0] * v[0] + m[0][1] * v[1],
+        m[1][0] * v[0] + m[1][1] * v[1]
+      ];
+    }
 
-    // Cleanup GPU resources
-    texture.destroy();
-    blurBuf.destroy();
-    gxBuf.destroy();
-    gyBuf.destroy();
-    saddleBuf.destroy();
-    subsBuf.destroy();
-    subtBuf.destroy();
-    uniformBuf.destroy();
-    pointsBuf.destroy();
-    counterBuf.destroy();
+    function meanPoints(pts) {
+      if (pts.length === 0) return [0, 0];
+      let sumX = 0, sumY = 0;
+      for (const p of pts) { sumX += p[0]; sumY += p[1]; }
+      return [sumX / pts.length, sumY / pts.length];
+    }
 
-    // Sort descending by score, with x and y as tie-breakers for stability
-    points.sort((a, b) => {
-      if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
-      if (Math.abs(b.x - a.x) > 1e-6) return b.x - a.x;
-      return b.y - a.y;
-    });
+    function medianPoints(pts) {
+      if (pts.length === 0) return [0, 0];
+      const xs = pts.map(p => p[0]).sort((a, b) => a - b);
+      const ys = pts.map(p => p[1]).sort((a, b) => a - b);
+      const mid = Math.floor(pts.length / 2);
+      return [xs[mid], ys[mid]]; // simplified median
+    }
 
-    // Convert to simple array format [x, y]
-    const parsedPoints = points.map(p => [p.x, p.y]);
-
-    // Apply NCC symmetry filter to remove T-corners and false positives
-    const validPoints = [];
-    const winsize = 5;
-    const imgDataArr = imageData.data;
-    const getGray = (x, y) => {
-      const idx = (y * width + x) * 4;
-      return imgDataArr[idx] * 0.299 + imgDataArr[idx + 1] * 0.587 + imgDataArr[idx + 2] * 0.114;
-    };
-
-    for (const pt of parsedPoints) {
-      const px = Math.round(pt[0]);
-      const py = Math.round(pt[1]);
-      if (px - winsize < 0 || px + winsize >= width || py - winsize < 0 || py + winsize >= height) {
-        continue;
-      }
-
-      const patch = new Float32Array(121);
+    // Separable 2D Gaussian filter
+    function gaussianFilter2D(map, width, height, sigma = 3) {
+      const radius = Math.ceil(4 * sigma);
+      const size = radius * 2 + 1;
+      const kernel = new Float32Array(size);
       let sum = 0;
+      for (let i = -radius; i <= radius; i++) {
+        const val = Math.exp(-(i * i) / (2 * sigma * sigma));
+        kernel[i + radius] = val;
+        sum += val;
+      }
+      for (let i = 0; i < size; i++) kernel[i] /= sum;
+
+      const temp = new Float32Array(width * height);
+      const out = new Float32Array(width * height);
+
+      // Horizontal pass
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          let v = 0;
+          for (let i = -radius; i <= radius; i++) {
+            const nx = Math.max(0, Math.min(width - 1, x + i));
+            v += map[y * width + nx] * kernel[i + radius];
+          }
+          temp[y * width + x] = v;
+        }
+      }
+
+      // Vertical pass
+      for (let x = 0; x < width; x++) {
+        for (let y = 0; y < height; y++) {
+          let v = 0;
+          for (let i = -radius; i <= radius; i++) {
+            const ny = Math.max(0, Math.min(height - 1, y + i));
+            v += temp[ny * width + x] * kernel[i + radius];
+          }
+          out[y * width + x] = v;
+        }
+      }
+
+      return out;
+    }
+
+    // Peak local max
+    function peakLocalMax(map, width, height, min_distance = 5, threshold_rel = 0.01) {
+      let maxVal = 0;
+      for (let i = 0; i < map.length; i++) {
+        if (map[i] > maxVal) maxVal = map[i];
+      }
+      const threshold = maxVal * threshold_rel;
+
+      const peaks = [];
+      for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+          const val = map[y * width + x];
+          if (val < threshold) continue;
+
+          let isMax = true;
+          for (let dy = -min_distance; dy <= min_distance; dy++) {
+            for (let dx = -min_distance; dx <= min_distance; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              const ny = y + dy;
+              const nx = x + dx;
+              if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+                if (map[ny * width + nx] >= val) {
+                  isMax = false;
+                  break;
+                }
+              }
+            }
+            if (!isMax) break;
+          }
+
+          if (isMax) {
+            peaks.push({ x, y, val });
+          }
+        }
+      }
+      return peaks;
+    }
+
+    // SVD and DLT for Homography with Hartley Normalization
+    function findHomography(srcPts, dstPts) {
+      if (srcPts.length < 4) return [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+
+      // Hartley normalization
+      function normalize(pts) {
+        let mx = 0, my = 0;
+        for (const p of pts) { mx += p[0]; my += p[1]; }
+        mx /= pts.length; my /= pts.length;
+
+        let distSum = 0;
+        for (const p of pts) {
+          const dx = p[0] - mx;
+          const dy = p[1] - my;
+          distSum += Math.sqrt(dx * dx + dy * dy);
+        }
+        const scale = Math.sqrt(2) / (distSum / pts.length || 1);
+
+        const T = [
+          [scale, 0, -scale * mx],
+          [0, scale, -scale * my],
+          [0, 0, 1]
+        ];
+
+        const normPts = pts.map(p => [
+          (p[0] - mx) * scale,
+          (p[1] - my) * scale
+        ]);
+        return { T, normPts };
+      }
+
+      const normSrc = normalize(srcPts);
+      const normDst = normalize(dstPts);
+
+      const A2 = [];
+      const B = [];
+      for (let i = 0; i < srcPts.length; i++) {
+        const u = normSrc.normPts[i][0], v = normSrc.normPts[i][1];
+        const x = normDst.normPts[i][0], y = normDst.normPts[i][1];
+        A2.push([u, v, 1, 0, 0, 0, -u * x, -v * x]);
+        B.push(x);
+        A2.push([0, 0, 0, u, v, 1, -u * y, -v * y]);
+        B.push(y);
+      }
+
+      const At = transpose(A2);
+      const AtA = matMult(At, A2);
+      const AtB = matMult(At, B.map(val => [val]));
+
+      const h = solveLinearSystem(AtA, AtB);
+      if (!h) return [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+
+      const H_norm = [
+        [h[0][0], h[1][0], h[2][0]],
+        [h[3][0], h[4][0], h[5][0]],
+        [h[6][0], h[7][0], 1]
+      ];
+
+      // Denormalize: H = T_dst^-1 * H_norm * T_src
+      // T_dst is diag(s, s, 1) with translation. Its inverse is:
+      const invT_dst = [
+        [1 / normDst.T[0][0], 0, -normDst.T[0][2] / normDst.T[0][0]],
+        [0, 1 / normDst.T[1][1], -normDst.T[1][2] / normDst.T[1][1]],
+        [0, 0, 1]
+      ];
+
+      const H_inter = matMult3x3(invT_dst, H_norm);
+      const H_final = matMult3x3(H_inter, normSrc.T);
+
+      // Normalize so H_final[2][2] = 1
+      const scale = H_final[2][2] || 1;
+      return H_final.map(row => row.map(val => val / scale));
+    }
+
+    // RANSAC Homography
+    function findHomographyRANSAC(srcPts, dstPts, maxIters = 200, inlierThreshold = 5.0) {
+      if (srcPts.length < 4) return findHomography(srcPts, dstPts);
+
+      let bestInliers = [];
+      let bestH = null;
+
+      // Use a simple LCG for deterministic results
+      let seed = 12345;
+      const seededRandom = () => {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return seed / 0x80000000;
+      };
+
+      for (let iter = 0; iter < maxIters; iter++) {
+        // Randomly pick 4 indices
+        const sampleIdx = [];
+        while (sampleIdx.length < 4) {
+          const idx = Math.floor(seededRandom() * srcPts.length);
+          if (!sampleIdx.includes(idx)) sampleIdx.push(idx);
+        }
+
+        const sampleSrc = sampleIdx.map(i => srcPts[i]);
+        const sampleDst = sampleIdx.map(i => dstPts[i]);
+
+        const H = findHomography(sampleSrc, sampleDst);
+        if (!H || H[2][2] !== 1) continue; // Invalid homography
+
+        const currentInliers = [];
+        for (let i = 0; i < srcPts.length; i++) {
+          const u = srcPts[i][0];
+          const v = srcPts[i][1];
+          const w = H[2][0] * u + H[2][1] * v + H[2][2];
+          if (Math.abs(w) < 1e-6) continue;
+
+          const px = (H[0][0] * u + H[0][1] * v + H[0][2]) / w;
+          const py = (H[1][0] * u + H[1][1] * v + H[1][2]) / w;
+
+          const dx = px - dstPts[i][0];
+          const dy = py - dstPts[i][1];
+          const err = Math.sqrt(dx * dx + dy * dy);
+
+          if (err < inlierThreshold) {
+            currentInliers.push(i);
+          }
+        }
+
+        if (currentInliers.length > bestInliers.length) {
+          bestInliers = currentInliers;
+          bestH = H;
+        }
+      }
+
+      if (bestInliers.length >= 4) {
+        const inlierSrc = bestInliers.map(i => srcPts[i]);
+        const inlierDst = bestInliers.map(i => dstPts[i]);
+        return findHomography(inlierSrc, inlierDst); // Refine with all inliers
+      }
+
+      return bestH || findHomography(srcPts, dstPts);
+    }
+
+    function matMult3x3(a, b) {
+      const out = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          out[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+        }
+      }
+      return out;
+    }
+
+    function transpose(m) {
+      const r = m.length, c = m[0].length;
+      const out = [];
+      for (let j = 0; j < c; j++) {
+        out[j] = [];
+        for (let i = 0; i < r; i++) {
+          out[j][i] = m[i][j];
+        }
+      }
+      return out;
+    }
+
+    function matMult(a, b) {
+      const r1 = a.length, c1 = a[0].length, c2 = b[0].length;
+      const out = Array.from({ length: r1 }, () => new Array(c2).fill(0));
+      for (let i = 0; i < r1; i++) {
+        for (let j = 0; j < c2; j++) {
+          for (let k = 0; k < c1; k++) {
+            out[i][j] += a[i][k] * b[k][j];
+          }
+        }
+      }
+      return out;
+    }
+
+    function solveLinearSystem(A, B) {
+      // Gaussian elimination
+      const n = A.length;
+      // Augment A with B
+      const aug = A.map((row, i) => [...row, B[i][0]]);
+
+      for (let i = 0; i < n; i++) {
+        let pivot = i;
+        for (let j = i + 1; j < n; j++) {
+          if (Math.abs(aug[j][i]) > Math.abs(aug[pivot][i])) pivot = j;
+        }
+        if (Math.abs(aug[pivot][i]) < 1e-10) return null; // singular
+
+        const temp = aug[i];
+        aug[i] = aug[pivot];
+        aug[pivot] = temp;
+
+        for (let j = i + 1; j < n; j++) {
+          const factor = aug[j][i] / aug[i][i];
+          for (let k = i; k <= n; k++) {
+            aug[j][k] -= factor * aug[i][k];
+          }
+        }
+      }
+
+      const x = Array(n).fill(0).map(() => [0]);
+      for (let i = n - 1; i >= 0; i--) {
+        let sum = 0;
+        for (let j = i + 1; j < n; j++) {
+          sum += aug[i][j] * x[j][0];
+        }
+        x[i][0] = (aug[i][n] - sum) / aug[i][i];
+      }
+      return x;
+    }
+
+
+    // --- FILE: C:\Users\eluci\Documents\GitHub\ChessboardHarmonicDetect\web/src/harmonicSolver.js ---
+
+
+    function findLatticeBasisVectors(points, numVectors = 8, bins = 100) {
+      const numPts = points.length;
+      if (numPts < 2) return { basisVectors: [], debugInfo: {} };
+
+      const numDists = numPts * (numPts - 1);
+      const xs = new Float32Array(numDists);
+      const ys = new Float32Array(numDists);
       let idx = 0;
-      for (let dy = -winsize; dy <= winsize; dy++) {
-        for (let dx = -winsize; dx <= winsize; dx++) {
-          const val = getGray(px + dx, py + dy);
-          patch[idx] = val;
-          sum += val;
+
+      for (let i = 0; i < numPts; i++) {
+        for (let j = 0; j < numPts; j++) {
+          if (i === j) continue;
+          xs[idx] = points[i][0] - points[j][0];
+          ys[idx] = points[i][1] - points[j][1];
           idx++;
         }
       }
 
-      const mean = sum / 121;
-      let num = 0, den1 = 0, den2 = 0;
-      for (let i = 0; i < 121; i++) {
-        const a = patch[i] - mean;
-        const b = patch[120 - i] - mean; // 180-degree rotation is just reversing the array
-        num += a * b;
-        den1 += a * a;
-        den2 += b * b;
+      // Determine histogram range (core 60%)
+      const xsSorted = new Float32Array(xs);
+      xsSorted.sort();
+      const ysSorted = new Float32Array(ys);
+      ysSorted.sort();
+
+      const x_min = xsSorted[Math.floor(numDists * 0.2)];
+      const x_max = xsSorted[Math.floor(numDists * 0.8)];
+      const y_min = ysSorted[Math.floor(numDists * 0.2)];
+      const y_max = ysSorted[Math.floor(numDists * 0.8)];
+
+      // 2D Histogram
+      const hist = new Float32Array(bins * bins);
+      const x_bin_width = (x_max - x_min) / bins;
+      const y_bin_width = (y_max - y_min) / bins;
+
+      for (let i = 0; i < numDists; i++) {
+        const bx = Math.floor((xs[i] - x_min) / x_bin_width);
+        const by = Math.floor((ys[i] - y_min) / y_bin_width);
+        if (bx >= 0 && bx < bins && by >= 0 && by < bins) {
+          hist[by * bins + bx] += 1; // row-major (y * width + x)
+        }
       }
 
-      const den = Math.sqrt(den1 * den2);
-      const ncc = den > 0 ? num / den : 0;
+      // Smooth density map
+      const densityMap = gaussianFilter2D(hist, bins, bins);
 
-      if (ncc > 0.25) {
-        validPoints.push(pt);
+      // Peak detection
+      const coordinates = peakLocalMax(densityMap, bins, bins, 5, 0.01);
+
+      let peakVectors = [];
+      let peakScores = [];
+      for (const c of coordinates) {
+        const px = x_min + (c.x + 0.5) * x_bin_width;
+        const py = y_min + (c.y + 0.5) * y_bin_width;
+        peakVectors.push([px, py]);
+        peakScores.push(c.val);
+      }
+
+      // Remove origin peak
+      let minNormIdx = -1;
+      let minNorm = Infinity;
+      for (let i = 0; i < peakVectors.length; i++) {
+        const n = norm(peakVectors[i]);
+        if (n < minNorm) {
+          minNorm = n;
+          minNormIdx = i;
+        }
+      }
+      if (minNormIdx !== -1 && minNorm < Math.max(x_bin_width, y_bin_width) * 2) {
+        peakVectors.splice(minNormIdx, 1);
+        peakScores.splice(minNormIdx, 1);
+      }
+
+      const harmonicScores = calculateHarmonicScores(peakVectors, peakScores);
+      let finalVectors = selectBestVectors(peakVectors, harmonicScores, numVectors);
+
+      const debugInfo = {
+        densityMap: Array.from(densityMap), // for drawing
+        extent: [x_min, x_max, y_min, y_max],
+        bins,
+        peakVectors: JSON.parse(JSON.stringify(peakVectors)),
+        basisVectors: JSON.parse(JSON.stringify(finalVectors))
+      };
+
+      // Pad to target count if necessary
+      while (finalVectors.length < numVectors) {
+        finalVectors.push([0, 0]);
+      }
+
+      return { basisVectors: finalVectors, debugInfo };
+    }
+
+    function calculateHarmonicScores(peakVectors, peakScores) {
+      const harmonicScores = [...peakScores];
+      const numPeaks = peakVectors.length;
+      const COS_SIM_THRESH = 0.985;
+      const MAG_RATIO_TOL = 0.15;
+
+      const mags = peakVectors.map(norm);
+
+      for (let j = 0; j < numPeaks; j++) {
+        for (let i = 0; i < numPeaks; i++) {
+          if (i === j) continue;
+
+          const mag_i = mags[i] + 1e-9;
+          const mag_j = mags[j];
+
+          if (mag_j > mag_i * 1.5) {
+            const dotProd = dot(peakVectors[i], peakVectors[j]);
+            const cos_sim = dotProd / (mag_i * mag_j);
+
+            if (cos_sim > COS_SIM_THRESH) {
+              const mag_ratio = mag_j / mag_i;
+              const k = Math.round(mag_ratio);
+
+              if (Math.abs(mag_ratio - k) < MAG_RATIO_TOL) {
+                const k_safe = k === 0 ? 1 : k;
+                harmonicScores[i] += peakScores[j] / k_safe;
+              }
+            }
+          }
+        }
+      }
+      return harmonicScores;
+    }
+
+    function selectBestVectors(peakVectors, harmonicScores, numVectors) {
+      const metrics = peakVectors.map((v, i) => ({
+        metric: harmonicScores[i] / (norm(v) + 1e-6),
+        vec: v,
+        idx: i
+      }));
+
+      metrics.sort((a, b) => b.metric - a.metric);
+
+      const finalVectors = [];
+      const COS_SIM_THRESH = 0.985;
+
+      for (const item of metrics) {
+        if (finalVectors.length >= numVectors) break;
+
+        let candidate = [...item.vec];
+        if (candidate[0] < -1e-6) {
+          candidate = [-candidate[0], -candidate[1]];
+        } else if (Math.abs(candidate[0]) < 1e-6 && candidate[1] < -1e-6) {
+          candidate = [-candidate[0], -candidate[1]];
+        }
+
+        let isRedundant = false;
+        for (const existing of finalVectors) {
+          const normProd = norm(candidate) * norm(existing);
+          if (normProd > 1e-6) {
+            const cosSim = dot(candidate, existing) / normProd;
+            if (Math.abs(cosSim) > COS_SIM_THRESH) {
+              isRedundant = true;
+              break;
+            }
+          }
+        }
+
+        if (!isRedundant) {
+          finalVectors.push(candidate);
+        }
+      }
+      return finalVectors;
+    }
+
+    function reprojectPoints(points, basisVectors) {
+      const det = det2x2(basisVectors);
+      if (Math.abs(det) < 1e-10) {
+        return { pointsLattice: points, center: meanPoints(points) };
+      }
+
+      const B_inv = inv2x2(basisVectors);
+      const pointsLattice = points.map(p => vecMatMul(p, B_inv));
+
+      const pointsLatticeOffset = meanPoints(pointsLattice);
+      for (let i = 0; i < pointsLattice.length; i++) {
+        pointsLattice[i][0] -= pointsLatticeOffset[0];
+        pointsLattice[i][1] -= pointsLatticeOffset[1];
+      }
+
+      // Circular mean for sub-grid offset
+      let sumSin = 0, sumCos = 0;
+      for (let i = 0; i < pointsLattice.length; i++) {
+        // Treat as complex number (combining both components isn't strictly right, python code applies mod 1 then angles)
+        // fractional parts
+        const fracX = ((pointsLattice[i][0] % 1) + 1) % 1;
+        const fracY = ((pointsLattice[i][1] % 1) + 1) % 1;
+        // Actually, circular mean is per component or applied via complex? 
+        // Python: fractional_parts = np.mod(points_lattice, 1) ... mean_angle = np.angle(np.mean(np.exp(1j * angles), axis=0))
+        // We do it per axis:
+      }
+      // Wait, let's do it per axis:
+      const offsetFrac = [0, 0];
+      for (let axis = 0; axis < 2; axis++) {
+        let s = 0, c = 0;
+        for (let i = 0; i < pointsLattice.length; i++) {
+          const frac = ((pointsLattice[i][axis] % 1) + 1) % 1;
+          const angle = 2 * Math.PI * frac;
+          s += Math.sin(angle);
+          c += Math.cos(angle);
+        }
+        const meanAngle = Math.atan2(s / pointsLattice.length, c / pointsLattice.length);
+        let val = meanAngle / (2 * Math.PI);
+        val = ((val % 1) + 1) % 1; // mod 1
+        offsetFrac[axis] = val;
+      }
+
+      for (let i = 0; i < pointsLattice.length; i++) {
+        pointsLattice[i][0] -= offsetFrac[0];
+        pointsLattice[i][1] -= offsetFrac[1];
+      }
+
+      const integerIndices = pointsLattice.map(p => [Math.round(p[0]), Math.round(p[1])]);
+      const integerOffset = meanPoints(integerIndices).map(Math.round);
+
+      for (let i = 0; i < pointsLattice.length; i++) {
+        pointsLattice[i][0] -= integerOffset[0];
+        pointsLattice[i][1] -= integerOffset[1];
+        integerIndices[i][0] -= integerOffset[0];
+        integerIndices[i][1] -= integerOffset[1];
+      }
+
+      const originEstimates = [];
+      for (let i = 0; i < points.length; i++) {
+        const latPart = vecMatMul(integerIndices[i], basisVectors);
+        originEstimates.push([points[i][0] - latPart[0], points[i][1] - latPart[1]]);
+      }
+
+      const bestCenter = medianPoints(originEstimates);
+
+      // Mapping best center back into lattice space
+      const bcl_raw = vecMatMul(bestCenter, B_inv);
+      const bestCenterLattice = [
+        bcl_raw[0] - pointsLatticeOffset[0] - offsetFrac[0] - integerOffset[0],
+        bcl_raw[1] - pointsLatticeOffset[1] - offsetFrac[1] - integerOffset[1]
+      ];
+
+      for (let i = 0; i < pointsLattice.length; i++) {
+        pointsLattice[i][0] -= bestCenterLattice[0];
+        pointsLattice[i][1] -= bestCenterLattice[1];
+      }
+
+      return { pointsLattice, center: bestCenter };
+    }
+
+    function getLatticeAndReproject(points, numVectors = 2) {
+      const { basisVectors, debugInfo } = findLatticeBasisVectors(points, numVectors);
+
+      if (basisVectors.length < 2) return { basisVectors: [], projectedPoints: [], center: [0, 0], debugInfo };
+
+      // Sort basis vectors by angle
+      basisVectors.sort((a, b) => Math.atan2(a[1], a[0]) - Math.atan2(b[1], b[0]));
+
+      const { pointsLattice, center } = reprojectPoints(points, basisVectors);
+      return { basisVectors, projectedPoints: pointsLattice, center, debugInfo };
+    }
+
+    function estimateChessGrid(latticePoints) {
+      if (latticePoints.length < 4) {
+        return { chessGridPoints: [], basisVectors: [], debugInfo: {} };
+      }
+      const { basisVectors, projectedPoints, center, debugInfo } = getLatticeAndReproject(latticePoints, 2);
+      const chessGridPoints = projectedPoints.map(p => [Math.round(p[0]), Math.round(p[1])]);
+      return { chessGridPoints, basisVectors, debugInfo };
+    }
+
+    function estimateHomography(latticePoints, chessGridPoints) {
+      return findHomographyRANSAC(chessGridPoints, latticePoints, 1000, 3.0);
+    }
+
+
+    // --- FILE: C:\Users\eluci\Documents\GitHub\ChessboardHarmonicDetect\web/src/saddleSolver.js ---
+
+
+    class SaddleSolver {
+      constructor() {
+        this.device = null;
+        this.pipelineBlur = null;
+        this.pipelineGrad = null;
+        this.pipelineSaddle = null;
+        this.pipelineNMS = null;
+      }
+
+      async init() {
+        if (!navigator.gpu) {
+          throw new Error("WebGPU not supported on this browser.");
+        }
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+          throw new Error("No appropriate GPUAdapter found.");
+        }
+        this.device = await adapter.requestDevice();
+
+        const module = this.device.createShaderModule({
+          label: 'Saddle Shader',
+          code: saddleWgsl,
+        });
+
+        const bgl = this.device.createBindGroupLayout({
+          entries: [
+            { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+            { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
+            { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            { binding: 9, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            { binding: 10, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+          ]
+        });
+        this.bgl = bgl;
+        const layout = this.device.createPipelineLayout({ bindGroupLayouts: [bgl] });
+
+        this.pipelineBlur = this.device.createComputePipeline({
+          layout: layout,
+          compute: { module, entryPoint: 'blur_pass' },
+        });
+        this.pipelineGrad = this.device.createComputePipeline({
+          layout: layout,
+          compute: { module, entryPoint: 'grad_pass' },
+        });
+        this.pipelineSaddle = this.device.createComputePipeline({
+          layout: layout,
+          compute: { module, entryPoint: 'saddle_pass' },
+        });
+        this.pipelineNMS = this.device.createComputePipeline({
+          layout: layout,
+          compute: { module, entryPoint: 'nms_pass' },
+        });
+      }
+
+      async findSaddlePoints(imageData, threshold = 10000) {
+        if (!this.device) await this.init();
+
+        const width = imageData.width;
+        const height = imageData.height;
+        const numPixels = width * height;
+
+        // 1. Create Image Texture
+        const texture = this.device.createTexture({
+          size: [width, height, 1],
+          format: 'rgba8unorm',
+          usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        });
+        this.device.queue.writeTexture(
+          { texture },
+          imageData.data,
+          { bytesPerRow: width * 4, rowsPerImage: height },
+          [width, height, 1]
+        );
+
+        // 2. Create buffers
+        const bufferSize = numPixels * 4; // f32
+        const createBuffer = () => this.device.createBuffer({
+          size: bufferSize,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        });
+
+        const blurBuf = createBuffer();
+        const gxBuf = createBuffer();
+        const gyBuf = createBuffer();
+        const saddleBuf = createBuffer();
+        const subsBuf = createBuffer();
+        const subtBuf = createBuffer();
+
+        // Uniforms
+        const uniformArray = new Float32Array([
+          width, height, threshold, 10
+        ]);
+        // Width and height as u32
+        const uniformU32 = new Uint32Array(uniformArray.buffer);
+        uniformU32[0] = width;
+        uniformU32[1] = height;
+        uniformU32[3] = 10; // winsize
+
+        const uniformBuf = this.device.createBuffer({
+          size: 16,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        this.device.queue.writeBuffer(uniformBuf, 0, uniformArray);
+
+        // Output buffer
+        const maxPoints = 5000;
+        const pointsBuf = this.device.createBuffer({
+          size: maxPoints * 5 * 4, // 5 floats per point
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        });
+        const counterBuf = this.device.createBuffer({
+          size: 4,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        });
+        this.device.queue.writeBuffer(counterBuf, 0, new Uint32Array([0]));
+
+        // Readback buffer
+        const readbackBuf = this.device.createBuffer({
+          size: 4 + maxPoints * 5 * 4 + bufferSize * 2, // counter + points + blur data + saddle data
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        });
+
+        // Bind Group
+        const bindGroup = this.device.createBindGroup({
+          layout: this.bgl,
+          entries: [
+            { binding: 0, resource: { buffer: uniformBuf } },
+            { binding: 2, resource: texture.createView() },
+            { binding: 3, resource: { buffer: blurBuf } },
+            { binding: 4, resource: { buffer: gxBuf } },
+            { binding: 5, resource: { buffer: gyBuf } },
+            { binding: 6, resource: { buffer: saddleBuf } },
+            { binding: 7, resource: { buffer: subsBuf } },
+            { binding: 8, resource: { buffer: subtBuf } },
+            { binding: 9, resource: { buffer: counterBuf } },
+            { binding: 10, resource: { buffer: pointsBuf } },
+          ],
+        });
+
+        // Dispatch
+        const commandEncoder = this.device.createCommandEncoder();
+        const workgroupCountX = Math.ceil(width / 16);
+        const workgroupCountY = Math.ceil(height / 16);
+
+        const pass1 = commandEncoder.beginComputePass();
+        pass1.setPipeline(this.pipelineBlur);
+        pass1.setBindGroup(0, bindGroup);
+        pass1.dispatchWorkgroups(workgroupCountX, workgroupCountY);
+        pass1.end();
+
+        const pass2 = commandEncoder.beginComputePass();
+        pass2.setPipeline(this.pipelineGrad);
+        pass2.setBindGroup(0, bindGroup);
+        pass2.dispatchWorkgroups(workgroupCountX, workgroupCountY);
+        pass2.end();
+
+        const pass3 = commandEncoder.beginComputePass();
+        pass3.setPipeline(this.pipelineSaddle);
+        pass3.setBindGroup(0, bindGroup);
+        pass3.dispatchWorkgroups(workgroupCountX, workgroupCountY);
+        pass3.end();
+
+        const pass4 = commandEncoder.beginComputePass();
+        pass4.setPipeline(this.pipelineNMS);
+        pass4.setBindGroup(0, bindGroup);
+        pass4.dispatchWorkgroups(workgroupCountX, workgroupCountY);
+        pass4.end();
+
+        // Copy results
+        commandEncoder.copyBufferToBuffer(counterBuf, 0, readbackBuf, 0, 4);
+        commandEncoder.copyBufferToBuffer(pointsBuf, 0, readbackBuf, 4, maxPoints * 5 * 4);
+        commandEncoder.copyBufferToBuffer(blurBuf, 0, readbackBuf, 4 + maxPoints * 5 * 4, bufferSize);
+        commandEncoder.copyBufferToBuffer(saddleBuf, 0, readbackBuf, 4 + maxPoints * 5 * 4 + bufferSize, bufferSize);
+
+        this.device.queue.submit([commandEncoder.finish()]);
+
+        // Read back
+        await readbackBuf.mapAsync(GPUMapMode.READ);
+        const arrayBuffer = readbackBuf.getMappedRange();
+        const count = Math.min(new Uint32Array(arrayBuffer)[0], maxPoints);
+
+        // Create persistent copies because unmap() detaches the ArrayBuffer
+        const pointsData = new Float32Array(arrayBuffer, 4, count * 5).slice();
+        const blurData = new Float32Array(arrayBuffer, 4 + maxPoints * 5 * 4, numPixels).slice();
+        const saddleData = new Float32Array(arrayBuffer, 4 + maxPoints * 5 * 4 + bufferSize, numPixels).slice();
+
+        // Parse points and sort by score
+        const points = [];
+        for (let i = 0; i < count; i++) {
+          points.push({
+            x: pointsData[i * 5 + 0] + pointsData[i * 5 + 2],
+            y: pointsData[i * 5 + 1] + pointsData[i * 5 + 3],
+            score: pointsData[i * 5 + 4]
+          });
+        }
+
+        readbackBuf.unmap();
+
+        // Cleanup GPU resources
+        texture.destroy();
+        blurBuf.destroy();
+        gxBuf.destroy();
+        gyBuf.destroy();
+        saddleBuf.destroy();
+        subsBuf.destroy();
+        subtBuf.destroy();
+        uniformBuf.destroy();
+        pointsBuf.destroy();
+        counterBuf.destroy();
+
+        // Sort descending by score, with x and y as tie-breakers for stability
+        points.sort((a, b) => {
+          if (Math.abs(b.score - a.score) > 1e-6) return b.score - a.score;
+          if (Math.abs(b.x - a.x) > 1e-6) return b.x - a.x;
+          return b.y - a.y;
+        });
+
+        // Convert to simple array format [x, y, score]
+        const parsedPoints = points.map(p => [p.x, p.y, p.score]);
+
+        // Apply NCC symmetry filter to remove T-corners and false positives
+        const validPoints = [];
+        const winsize = 5;
+        const getBlur = (x, y) => {
+          const idx = y * width + x;
+          return blurData[idx];
+        };
+
+        for (const pt of parsedPoints) {
+          const px = Math.round(pt[0]);
+          const py = Math.round(pt[1]);
+          if (px - winsize < 0 || px + winsize >= width || py - winsize < 0 || py + winsize >= height) {
+            continue;
+          }
+
+          const patch = new Float32Array(121);
+          let sum = 0;
+          let idx = 0;
+          for (let dy = -winsize; dy <= winsize; dy++) {
+            for (let dx = -winsize; dx <= winsize; dx++) {
+              const val = getBlur(px + dx, py + dy);
+              patch[idx] = val;
+              sum += val;
+              idx++;
+            }
+          }
+
+          const mean = sum / 121;
+          let num = 0, den1 = 0, den2 = 0;
+          for (let i = 0; i < 121; i++) {
+            const a = patch[i] - mean;
+            const b = patch[120 - i] - mean; // 180-degree rotation
+            num += a * b;
+            den1 += a * a;
+            den2 += b * b;
+          }
+
+          const den = Math.sqrt(den1 * den2);
+          const ncc = den > 0 ? num / den : 0;
+
+          if (ncc > 0.25) {
+            validPoints.push(pt);
+          }
+        }
+
+        return {
+          points: validPoints,
+          saddleData: saddleData,
+          blurData: blurData,
+          width,
+          height
+        };
       }
     }
 
-    return validPoints;
-  }
-}
 
+    // --- FILE: C:\Users\eluci\Documents\GitHub\ChessboardHarmonicDetect\web/src/visualize.js ---
+    function drawSaddlePoints(canvas, image, points) {
+      const ctx = canvas.getContext('2d');
+      canvas.width = image.width;
+      canvas.height = image.height;
 
-// --- FILE: C:\Users\eluci\Documents\GitHub\ChessboardHarmonicDetect\web/src/visualize.js ---
-function drawSaddlePoints(canvas, image, points) {
-  const ctx = canvas.getContext('2d');
-  canvas.width = image.width;
-  canvas.height = image.height;
-  
-  ctx.drawImage(image, 0, 0);
-  
-  ctx.fillStyle = '#00ff00';
-  for (const [x, y] of points) {
-    ctx.beginPath();
-    ctx.arc(x, y, 3, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
+      ctx.drawImage(image, 0, 0);
 
-function drawDisplacementMap(canvas, debugInfo) {
-  if (!debugInfo || !debugInfo.densityMap) return;
-  const { densityMap, bins } = debugInfo;
-  
-  canvas.width = bins;
-  canvas.height = bins;
-  const ctx = canvas.getContext('2d');
-  const imgData = ctx.createImageData(bins, bins);
-  
-  let maxDens = 0;
-  for (let i = 0; i < densityMap.length; i++) {
-    if (densityMap[i] > maxDens) maxDens = densityMap[i];
-  }
-  
-  for (let i = 0; i < densityMap.length; i++) {
-    const val = (densityMap[i] / maxDens) * 255;
-    imgData.data[i * 4 + 0] = val * 0.4;   // R
-    imgData.data[i * 4 + 1] = val * 0.6;   // G
-    imgData.data[i * 4 + 2] = val;         // B
-    imgData.data[i * 4 + 3] = 255;         // A
-  }
-  ctx.putImageData(imgData, 0, 0);
-}
+      ctx.fillStyle = '#00ff00';
+      ctx.font = '10px Inter, sans-serif';
+      for (const [x, y, score] of points) {
+        // Draw point
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
 
-function drawDisplacementOverlay(svg, debugInfo) {
-  if (!debugInfo || !debugInfo.bins) return;
-  const { bins, extent, peakVectors, basisVectors } = debugInfo;
-  
-  // Clear SVG
-  while (svg.firstChild) svg.removeChild(svg.firstChild);
-  
-  // Set viewBox to match bin coordinates
-  svg.setAttribute('viewBox', `0 0 ${bins} ${bins}`);
-  
-  const [xmin, xmax, ymin, ymax] = extent;
-  const toCoord = (vx, vy) => [
-    ((vx - xmin) / (xmax - xmin)) * bins,
-    ((vy - ymin) / (ymax - ymin)) * bins
-  ];
+    function drawDisplacementMap(canvas, debugInfo) {
+      if (!debugInfo || !debugInfo.densityMap) return;
+      const { densityMap, bins } = debugInfo;
 
-  const [ox, oy] = toCoord(0, 0);
-  const NS = "http://www.w3.org/2000/svg";
+      canvas.width = bins;
+      canvas.height = bins;
+      const ctx = canvas.getContext('2d');
+      const imgData = ctx.createImageData(bins, bins);
 
-  // Peaks
-  peakVectors.forEach(([px, py]) => {
-    const [bx, by] = toCoord(px, py);
-    const circle = document.createElementNS(NS, "circle");
-    circle.setAttribute("cx", bx);
-    circle.setAttribute("cy", by);
-    circle.setAttribute("r", 1.5);
-    circle.setAttribute("fill", "#ffffff");
-    svg.appendChild(circle);
-  });
+      let maxDens = 0;
+      for (let i = 0; i < densityMap.length; i++) {
+        if (densityMap[i] > maxDens) maxDens = densityMap[i];
+      }
 
-  // Basis Vectors
-  if (basisVectors) {
-    const colors = ['#00ffcc', '#ff3366', '#ffff00', '#00ff00'];
-    basisVectors.forEach((v, i) => {
-      if (v[0] === 0 && v[1] === 0) return;
-      const [tx, ty] = toCoord(v[0], v[1]);
-      const color = colors[i % colors.length];
-      
-      // Primary arrow
-      svg.appendChild(createSVGArrow(ox, oy, tx, ty, color, 2));
-      
-      // Negative symmetric arrow
-      const [tx2, ty2] = toCoord(-v[0], -v[1]);
-      svg.appendChild(createSVGArrow(ox, oy, tx2, ty2, color, 1, true));
-    });
-  }
+      for (let i = 0; i < densityMap.length; i++) {
+        const val = (densityMap[i] / maxDens) * 255;
+        imgData.data[i * 4 + 0] = val * 0.4;   // R
+        imgData.data[i * 4 + 1] = val * 0.6;   // G
+        imgData.data[i * 4 + 2] = val;         // B
+        imgData.data[i * 4 + 3] = 255;         // A
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
 
-  // Origin crosshair
-  const cross = document.createElementNS(NS, "path");
-  cross.setAttribute("d", `M ${ox-5} ${oy} L ${ox+5} ${oy} M ${ox} ${oy-5} L ${ox} ${oy+5}`);
-  cross.setAttribute("stroke", "rgba(255,255,255,0.4)");
-  cross.setAttribute("stroke-width", "0.5");
-  svg.appendChild(cross);
-}
+    function drawDisplacementOverlay(svg, debugInfo) {
+      if (!debugInfo || !debugInfo.bins) return;
+      const { bins, extent, peakVectors, basisVectors } = debugInfo;
 
-function createSVGArrow(x1, y1, x2, y2, color, width, dashed=false) {
-  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  line.setAttribute("x1", x1);
-  line.setAttribute("y1", y1);
-  line.setAttribute("x2", x2);
-  line.setAttribute("y2", y2);
-  line.setAttribute("stroke", color);
-  line.setAttribute("stroke-width", width);
-  if (dashed) line.setAttribute("stroke-dasharray", "2,2");
-  g.appendChild(line);
+      // Clear SVG
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
 
-  if (!dashed) {
-    const headLength = 6;
-    const angle = Math.atan2(y2 - y1, x2 - x1);
-    const p1 = [x2 - headLength * Math.cos(angle - Math.PI / 6), y2 - headLength * Math.sin(angle - Math.PI / 6)];
-    const p2 = [x2 - headLength * Math.cos(angle + Math.PI / 6), y2 - headLength * Math.sin(angle + Math.PI / 6)];
-    
-    const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-    poly.setAttribute("points", `${x2},${y2} ${p1[0]},${p1[1]} ${p2[0]},${p2[1]}`);
-    poly.setAttribute("fill", color);
-    g.appendChild(poly);
-  }
-  return g;
-}
+      // Set viewBox to match bin coordinates
+      svg.setAttribute('viewBox', `0 0 ${bins} ${bins}`);
 
-function drawHomographyOverlay(canvas, image, H, chessGridPoints, debugTextElement, offsetX = 0, offsetY = 0) {
-  const ctx = canvas.getContext('2d');
-  canvas.width = image.width;
-  canvas.height = image.height;
-  
-  ctx.drawImage(image, 0, 0);
-  
-  if (!H || H.length !== 3) {
-    if (debugTextElement) debugTextElement.textContent = "No valid homography found.";
-    return;
-  }
-  
-  // Transform function
-  const transformPoint = (u, v) => {
-    const w = H[2][0]*u + H[2][1]*v + H[2][2];
-    if (Math.abs(w) < 1e-6) return [0, 0];
-    const x = (H[0][0]*u + H[0][1]*v + H[0][2]) / w;
-    const y = (H[1][0]*u + H[1][1]*v + H[1][2]) / w;
-    return [x, y];
-  };
+      const [xmin, xmax, ymin, ymax] = extent;
+      const toCoord = (vx, vy) => [
+        ((vx - xmin) / (xmax - xmin)) * bins,
+        ((vy - ymin) / (ymax - ymin)) * bins
+      ];
 
-  // Fixed 8x8 grid bounds with offsets
-  const x_start = -4 + offsetX;
-  const x_end = 4 + offsetX;
-  const y_start = -4 + offsetY;
-  const y_end = 4 + offsetY;
+      const [ox, oy] = toCoord(0, 0);
+      const NS = "http://www.w3.org/2000/svg";
 
-  // Draw warped checkerboard
-  ctx.save();
-  ctx.globalAlpha = 0.4;
-  for (let x = x_start; x < x_end; x++) {
-    for (let y = y_start; y < y_end; y++) {
-      // Use absolute lattice coordinates for consistent coloring
-      ctx.fillStyle = (x + y) % 2 === 0 ? '#ffffff' : '#222222';
-      
-      const p1 = transformPoint(x, y);
-      const p2 = transformPoint(x + 1, y);
-      const p3 = transformPoint(x + 1, y + 1);
-      const p4 = transformPoint(x, y + 1);
-      
+      // Peaks
+      peakVectors.forEach(([px, py]) => {
+        const [bx, by] = toCoord(px, py);
+        const circle = document.createElementNS(NS, "circle");
+        circle.setAttribute("cx", bx);
+        circle.setAttribute("cy", by);
+        circle.setAttribute("r", 1.5);
+        circle.setAttribute("fill", "#ffffff");
+        svg.appendChild(circle);
+      });
+
+      // Basis Vectors
+      if (basisVectors) {
+        const colors = ['#00ffcc', '#ff3366', '#ffff00', '#00ff00'];
+        basisVectors.forEach((v, i) => {
+          if (v[0] === 0 && v[1] === 0) return;
+          const [tx, ty] = toCoord(v[0], v[1]);
+          const color = colors[i % colors.length];
+
+          // Primary arrow
+          svg.appendChild(createSVGArrow(ox, oy, tx, ty, color, 2));
+
+          // Negative symmetric arrow
+          const [tx2, ty2] = toCoord(-v[0], -v[1]);
+          svg.appendChild(createSVGArrow(ox, oy, tx2, ty2, color, 1, true));
+        });
+      }
+
+      // Origin crosshair
+      const cross = document.createElementNS(NS, "path");
+      cross.setAttribute("d", `M ${ox - 5} ${oy} L ${ox + 5} ${oy} M ${ox} ${oy - 5} L ${ox} ${oy + 5}`);
+      cross.setAttribute("stroke", "rgba(255,255,255,0.4)");
+      cross.setAttribute("stroke-width", "0.5");
+      svg.appendChild(cross);
+    }
+
+    function createSVGArrow(x1, y1, x2, y2, color, width, dashed = false) {
+      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", x1);
+      line.setAttribute("y1", y1);
+      line.setAttribute("x2", x2);
+      line.setAttribute("y2", y2);
+      line.setAttribute("stroke", color);
+      line.setAttribute("stroke-width", width);
+      if (dashed) line.setAttribute("stroke-dasharray", "2,2");
+      g.appendChild(line);
+
+      if (!dashed) {
+        const headLength = 6;
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        const p1 = [x2 - headLength * Math.cos(angle - Math.PI / 6), y2 - headLength * Math.sin(angle - Math.PI / 6)];
+        const p2 = [x2 - headLength * Math.cos(angle + Math.PI / 6), y2 - headLength * Math.sin(angle + Math.PI / 6)];
+
+        const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+        poly.setAttribute("points", `${x2},${y2} ${p1[0]},${p1[1]} ${p2[0]},${p2[1]}`);
+        poly.setAttribute("fill", color);
+        g.appendChild(poly);
+      }
+      return g;
+    }
+
+    function drawHomographyOverlay(canvas, image, H, chessGridPoints, debugTextElement, offsetX = 0, offsetY = 0) {
+      const ctx = canvas.getContext('2d');
+      canvas.width = image.width;
+      canvas.height = image.height;
+
+      ctx.drawImage(image, 0, 0);
+
+      if (!H || H.length !== 3) {
+        if (debugTextElement) debugTextElement.textContent = "No valid homography found.";
+        return;
+      }
+
+      // Transform function
+      const transformPoint = (u, v) => {
+        const w = H[2][0] * u + H[2][1] * v + H[2][2];
+        if (Math.abs(w) < 1e-6) return [0, 0];
+        const x = (H[0][0] * u + H[0][1] * v + H[0][2]) / w;
+        const y = (H[1][0] * u + H[1][1] * v + H[1][2]) / w;
+        return [x, y];
+      };
+
+      // Fixed 8x8 grid bounds with offsets
+      const x_start = -4 + offsetX;
+      const x_end = 4 + offsetX;
+      const y_start = -4 + offsetY;
+      const y_end = 4 + offsetY;
+
+      // Draw warped checkerboard
+      ctx.save();
+      ctx.globalAlpha = 0.4;
+      for (let x = x_start; x < x_end; x++) {
+        for (let y = y_start; y < y_end; y++) {
+          // Use absolute lattice coordinates for consistent coloring
+          ctx.fillStyle = (x + y) % 2 === 0 ? '#ffffff' : '#222222';
+
+          const p1 = transformPoint(x, y);
+          const p2 = transformPoint(x + 1, y);
+          const p3 = transformPoint(x + 1, y + 1);
+          const p4 = transformPoint(x, y + 1);
+
+          ctx.beginPath();
+          ctx.moveTo(p1[0], p1[1]);
+          ctx.lineTo(p2[0], p2[1]);
+          ctx.lineTo(p3[0], p3[1]);
+          ctx.lineTo(p4[0], p4[1]);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+
+      // Draw 4 corners and outline of the 8x8 grid
+      const corners = [
+        [x_start, y_start], [x_end, y_start], [x_end, y_end], [x_start, y_end]
+      ];
+      const projectedCorners = corners.map(c => transformPoint(c[0], c[1]));
+
+      ctx.strokeStyle = '#00ffcc';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([10, 5]);
       ctx.beginPath();
-      ctx.moveTo(p1[0], p1[1]);
-      ctx.lineTo(p2[0], p2[1]);
-      ctx.lineTo(p3[0], p3[1]);
-      ctx.lineTo(p4[0], p4[1]);
+      ctx.moveTo(projectedCorners[0][0], projectedCorners[0][1]);
+      for (let i = 1; i < 4; i++) {
+        ctx.lineTo(projectedCorners[i][0], projectedCorners[i][1]);
+      }
       ctx.closePath();
-      ctx.fill();
-    }
-  }
-  ctx.restore();
+      ctx.stroke();
+      ctx.setLineDash([]);
 
-  // Draw 4 corners and outline of the 8x8 grid
-  const corners = [
-    [x_start, y_start], [x_end, y_start], [x_end, y_end], [x_start, y_end]
-  ];
-  const projectedCorners = corners.map(c => transformPoint(c[0], c[1]));
+      // Draw corner points
+      for (let i = 0; i < projectedCorners.length; i++) {
+        const p = projectedCorners[i];
+        ctx.fillStyle = '#ff3366';
+        ctx.beginPath();
+        ctx.arc(p[0], p[1], 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
 
-  ctx.strokeStyle = '#00ffcc';
-  ctx.lineWidth = 4;
-  ctx.setLineDash([10, 5]);
-  ctx.beginPath();
-  ctx.moveTo(projectedCorners[0][0], projectedCorners[0][1]);
-  for (let i = 1; i < 4; i++) {
-    ctx.lineTo(projectedCorners[i][0], projectedCorners[i][1]);
-  }
-  ctx.closePath();
-  ctx.stroke();
-  ctx.setLineDash([]);
+        // Label
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 14px Inter, sans-serif';
+        ctx.fillText(`C${i}`, p[0] + 12, p[1] + 12);
+      }
 
-  // Draw corner points
-  for (let i = 0; i < projectedCorners.length; i++) {
-    const p = projectedCorners[i];
-    ctx.fillStyle = '#ff3366';
-    ctx.beginPath();
-    ctx.arc(p[0], p[1], 8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    
-    // Label
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 14px Inter, sans-serif';
-    ctx.fillText(`C${i}`, p[0] + 12, p[1] + 12);
-  }
-
-  // Update debug text
-  if (debugTextElement) {
-    const hStr = H.map(row => "  [ " + row.map(v => v.toFixed(6).padStart(10)).join(', ') + " ]").join('\n');
-    const cornersStr = projectedCorners.map((p, i) => `Corner ${i} (Lattice ${corners[i][0]},${corners[i][1]}): (${p[0].toFixed(2).padStart(8)}, ${p[1].toFixed(2).padStart(8)})`).join('\n');
-    debugTextElement.innerHTML = `<span class="text-indigo-400 font-bold">Homography Matrix H:</span>\n${hStr}\n\n<span class="text-indigo-400 font-bold">Projected 8x8 Corner Points (px):</span>\n${cornersStr}\n\n<span class="text-indigo-400 font-bold">Current Offsets:</span> X: ${offsetX}, Y: ${offsetY}`;
-  }
-}
-
-
-// --- FILE: C:\Users\eluci\Documents\GitHub\ChessboardHarmonicDetect\web/src/main.js ---
-
-
-
-
-const solver = new SaddleSolver();
-let sourceImage = null; // Original upload (Image element)
-let workingImage = null; // Resized version for processing (Canvas)
-let currentHomography = null;
-let currentChessGridPoints = null;
-let currentOffsetX = 0;
-let currentOffsetY = 0;
-
-const UI = {
-  fileInput: document.getElementById('imageInput'),
-  runBtn: document.getElementById('runBtn'),
-  statusText: document.getElementById('statusText'),
-  saddleCanvas: document.getElementById('saddleCanvas'),
-  histCanvas: document.getElementById('histCanvas'),
-  histSVG: document.getElementById('histSVG'),
-  finalCanvas: document.getElementById('finalCanvas'),
-  debugInfo: document.getElementById('debugInfo'),
-  offsetX: document.getElementById('offsetX'),
-  offsetY: document.getElementById('offsetY'),
-  offsetXVal: document.getElementById('offsetXVal'),
-  offsetYVal: document.getElementById('offsetYVal'),
-  saddleTime: document.getElementById('saddleTime'),
-  harmonicTime: document.getElementById('harmonicTime'),
-};
-
-function updateOverlay() {
-  if (currentHomography && workingImage) {
-    drawHomographyOverlay(UI.finalCanvas, workingImage, currentHomography, currentChessGridPoints, UI.debugInfo, currentOffsetX, currentOffsetY);
-  }
-}
-
-function resizeImage(img, maxDim = 640) {
-  // Always derive from the natural dimensions to avoid CSS scaling issues
-  let width = img.naturalWidth || img.width;
-  let height = img.naturalHeight || img.height;
-
-  console.log(`Source Image Dimensions: ${width}x${height}`);
-
-  if (width > maxDim || height > maxDim) {
-    if (width > height) {
-      height = Math.round((height * maxDim) / width);
-      width = maxDim;
-    } else {
-      width = Math.round((width * maxDim) / height);
-      height = maxDim;
-    }
-    console.log(`Resizing to: ${width}x${height}`);
-  }
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, width, height);
-  return canvas;
-}
-
-function setStatus(msg, isError = false) {
-  UI.statusText.textContent = msg;
-  UI.statusText.className = `text-sm font-medium px-4 py-2 rounded-md border ${isError ? 'bg-red-900/50 text-red-400 border-red-900/50' : 'bg-slate-800/50 text-cyan-400 border-cyan-900/50'
-    }`;
-}
-
-async function init() {
-  try {
-    await solver.init();
-    setStatus("WebGPU Initialized. Ready.");
-  } catch (e) {
-    setStatus("WebGPU initialization failed: " + e.message, true);
-    console.error(e);
-  }
-
-  UI.fileInput.addEventListener('change', handleFile);
-  UI.runBtn.addEventListener('click', runPipeline);
-
-  UI.offsetX.addEventListener('input', (e) => {
-    currentOffsetX = parseInt(e.target.value);
-    UI.offsetXVal.textContent = currentOffsetX;
-    updateOverlay();
-  });
-  UI.offsetY.addEventListener('input', (e) => {
-    currentOffsetY = parseInt(e.target.value);
-    UI.offsetYVal.textContent = currentOffsetY;
-    updateOverlay();
-  });
-
-  // Load default image
-  loadImage('data:image/jpeg;base64,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');
-}
-
-function handleFile(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  const url = URL.createObjectURL(file);
-  loadImage(url);
-}
-
-function loadImage(url) {
-  const img = new Image();
-  img.onload = () => {
-    sourceImage = img;
-    // Resize once on load
-    workingImage = resizeImage(sourceImage, 640);
-    setStatus("Image loaded. Press 'Run Detection'.");
-    runPipeline(); // Auto run on load
-  };
-  img.onerror = () => setStatus("Failed to load image.", true);
-  img.src = url;
-}
-
-async function runPipeline() {
-  if (!sourceImage) return;
-  if (!solver.device) {
-    setStatus("WebGPU not available.", true);
-    return;
-  }
-
-  try {
-    if (!workingImage) {
-      setStatus("Resizing image for processing...");
-      workingImage = resizeImage(sourceImage, 640);
+      // Update debug text
+      if (debugTextElement) {
+        const hStr = H.map(row => "  [ " + row.map(v => v.toFixed(6).padStart(10)).join(', ') + " ]").join('\n');
+        const cornersStr = projectedCorners.map((p, i) => `Corner ${i} (Lattice ${corners[i][0]},${corners[i][1]}): (${p[0].toFixed(2).padStart(8)}, ${p[1].toFixed(2).padStart(8)})`).join('\n');
+        debugTextElement.innerHTML = `<span class="text-indigo-400 font-bold">Homography Matrix H:</span>\n${hStr}\n\n<span class="text-indigo-400 font-bold">Projected 8x8 Corner Points (px):</span>\n${cornersStr}\n\n<span class="text-indigo-400 font-bold">Current Offsets:</span> X: ${offsetX}, Y: ${offsetY}`;
+      }
     }
 
-    const width = workingImage.width;
-    const height = workingImage.height;
-    const ctx = workingImage.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, width, height);
 
-    setStatus("Running WebGPU Saddle detection...");
-    const t0 = performance.now();
-    const allPoints = await solver.findSaddlePoints(imageData, 10000); // returns [[x,y], ...]
-    const points = allPoints.slice(0, 400); // Limit to top 400 for stability
-    const t1 = performance.now();
-    const saddleDur = (t1 - t0).toFixed(1);
-    UI.saddleTime.textContent = `${saddleDur}ms`;
-    console.log(`WebGPU found ${points.length} points in ${saddleDur}ms`);
-
-    drawSaddlePoints(UI.saddleCanvas, workingImage, points);
-
-    setStatus("Running Harmonic solver...");
-    const t2 = performance.now();
-    const { chessGridPoints, basisVectors, debugInfo } = estimateChessGrid(points);
-    const t3 = performance.now();
-    const harmonicDur = (t3 - t2).toFixed(1);
-    UI.harmonicTime.textContent = `${harmonicDur}ms`;
-    console.log(`Harmonic solver finished in ${harmonicDur}ms`);
-
-    drawDisplacementMap(UI.histCanvas, debugInfo);
-    drawDisplacementOverlay(UI.histSVG, debugInfo);
-
-    setStatus("Estimating Homography...");
-    const homography = estimateHomography(points, chessGridPoints);
-
-    currentHomography = homography;
-    currentChessGridPoints = chessGridPoints;
-
-    // Reset offsets on new run
-    currentOffsetX = 0;
-    currentOffsetY = 0;
-    UI.offsetX.value = 0;
-    UI.offsetY.value = 0;
-    UI.offsetXVal.textContent = "0";
-    UI.offsetYVal.textContent = "0";
-
-    updateOverlay();
-
-    setStatus(`Success! Detected ${points.length} lattice points. Took ${(parseFloat(saddleDur) + parseFloat(harmonicDur)).toFixed(1)}ms total.`);
-
-  } catch (err) {
-    setStatus("Pipeline error: " + err.message, true);
-    console.error(err);
-  }
-}
-
-init();
+    // --- FILE: C:\Users\eluci\Documents\GitHub\ChessboardHarmonicDetect\web/src/main.js ---
 
 
 
-</script>
+
+    const solver = new SaddleSolver();
+    let sourceImage = null; // Original upload (Image element)
+    let workingImage = null; // Resized version for processing (Canvas)
+    let currentHomography = null;
+    let currentChessGridPoints = null;
+    let currentOffsetX = 0;
+    let currentOffsetY = 0;
+
+    const UI = {
+      fileInput: document.getElementById('imageInput'),
+      runBtn: document.getElementById('runBtn'),
+      statusText: document.getElementById('statusText'),
+      saddleCanvas: document.getElementById('saddleCanvas'),
+      histCanvas: document.getElementById('histCanvas'),
+      histSVG: document.getElementById('histSVG'),
+      finalCanvas: document.getElementById('finalCanvas'),
+      debugInfo: document.getElementById('debugInfo'),
+      maxPoints: document.getElementById('maxPoints'),
+      maxPointsVal: document.getElementById('maxPointsVal'),
+      offsetX: document.getElementById('offsetX'),
+      offsetY: document.getElementById('offsetY'),
+      offsetXVal: document.getElementById('offsetXVal'),
+      offsetYVal: document.getElementById('offsetYVal'),
+      saddleTime: document.getElementById('saddleTime'),
+      harmonicTime: document.getElementById('harmonicTime'),
+    };
+
+    function updateOverlay() {
+      if (currentHomography && workingImage) {
+        drawHomographyOverlay(UI.finalCanvas, workingImage, currentHomography, currentChessGridPoints, UI.debugInfo, currentOffsetX, currentOffsetY);
+      }
+    }
+
+    function resizeImage(img, maxDim = 640) {
+      // Always derive from the natural dimensions to avoid CSS scaling issues
+      let width = img.naturalWidth || img.width;
+      let height = img.naturalHeight || img.height;
+
+      console.log(`Source Image Dimensions: ${width}x${height}`);
+
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+        console.log(`Resizing to: ${width}x${height}`);
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      return canvas;
+    }
+
+    function setStatus(msg, isError = false) {
+      UI.statusText.textContent = msg;
+      UI.statusText.className = `text-sm font-medium px-4 py-2 rounded-md border ${isError ? 'bg-red-900/50 text-red-400 border-red-900/50' : 'bg-slate-800/50 text-cyan-400 border-cyan-900/50'
+        }`;
+    }
+
+    async function init() {
+      try {
+        await solver.init();
+        // setStatus("WebGPU Initialized. Ready.");
+      } catch (e) {
+        setStatus("WebGPU initialization failed: " + e.message, true);
+        console.error(e);
+      }
+
+      UI.fileInput.addEventListener('change', handleFile);
+      UI.runBtn.addEventListener('click', runPipeline);
+
+      UI.offsetX.addEventListener('input', (e) => {
+        currentOffsetX = parseInt(e.target.value);
+        UI.offsetXVal.textContent = currentOffsetX;
+        updateOverlay();
+      });
+      UI.offsetY.addEventListener('input', (e) => {
+        currentOffsetY = parseInt(e.target.value);
+        UI.offsetYVal.textContent = currentOffsetY;
+        updateOverlay();
+      });
+      UI.maxPoints.addEventListener('input', (e) => {
+        UI.maxPointsVal.textContent = e.target.value;
+        runPipeline();
+      });
+
+      // Load default image
+      loadImage('data:image/jpeg;base64,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');
+    }
+
+    function handleFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const url = URL.createObjectURL(file);
+      loadImage(url);
+    }
+
+    function loadImage(url) {
+      const img = new Image();
+      img.onload = () => {
+        sourceImage = img;
+        // Resize once on load
+        workingImage = resizeImage(sourceImage, 640);
+        // setStatus("Image loaded. Running Pipeline.");
+        UI.maxPoints.value = 40; // Reset default maxPts
+        UI.maxPointsVal.textContent = 40;
+        runPipeline(); // Auto run on load
+      };
+      img.onerror = () => setStatus("Failed to load image.", true);
+      img.src = url;
+    }
+
+    async function runPipeline() {
+      if (!sourceImage) return;
+      if (!solver.device) {
+        setStatus("WebGPU not available.", true);
+        return;
+      }
+
+      try {
+        if (!workingImage) {
+          setStatus("Resizing image for processing...");
+          workingImage = resizeImage(sourceImage, 640);
+        }
+
+        const width = workingImage.width;
+        const height = workingImage.height;
+        const ctx = workingImage.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, width, height);
+
+        // setStatus("Running Saddle detection...");
+        const t0 = performance.now();
+        const result = await solver.findSaddlePoints(imageData, 10000);
+        const allPoints = result.points;
+
+        const maxPts = parseInt(UI.maxPoints.value);
+        const points = allPoints.slice(0, maxPts); // Limit to top maxPts
+
+        const t1 = performance.now();
+        const saddleDur = (t1 - t0).toFixed(1);
+        UI.saddleTime.textContent = `${saddleDur}ms`;
+        console.log(`WebGPU found ${points.length} points in ${saddleDur}ms`);
+
+        drawSaddlePoints(UI.saddleCanvas, workingImage, points);
+
+        // setStatus("Running Harmonic solver...");
+        const t2 = performance.now();
+        const { chessGridPoints, basisVectors, debugInfo } = estimateChessGrid(points);
+        const t3 = performance.now();
+        const harmonicDur = (t3 - t2).toFixed(1);
+        UI.harmonicTime.textContent = `${harmonicDur}ms`;
+        console.log(`Harmonic solver finished in ${harmonicDur}ms`);
+
+        drawDisplacementMap(UI.histCanvas, debugInfo);
+        drawDisplacementOverlay(UI.histSVG, debugInfo);
+
+        // setStatus("Estimating Homography...");
+        const homography = estimateHomography(points, chessGridPoints);
+
+        currentHomography = homography;
+        currentChessGridPoints = chessGridPoints;
+
+        // Reset offsets on new run
+        currentOffsetX = 0;
+        currentOffsetY = 0;
+        UI.offsetX.value = 0;
+        UI.offsetY.value = 0;
+        UI.offsetXVal.textContent = "0";
+        UI.offsetYVal.textContent = "0";
+
+        updateOverlay();
+
+        setStatus(`Solved in ${(parseFloat(saddleDur) + parseFloat(harmonicDur)).toFixed(1)}ms.`);
+
+      } catch (err) {
+        setStatus("Pipeline error: " + err.message, true);
+        console.error(err);
+      }
+    }
+
+    init();
+
+
+
+  </script>
 </body>
 
 </html>
