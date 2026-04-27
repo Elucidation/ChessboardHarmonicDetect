@@ -1,8 +1,6 @@
 import cv2
 import numpy as np
 
-# NOTE : This is much slower than it could be, ML-based would be faster, or C++/GPU implementation etc.
-
 def _get_saddle(gray_img):
     img = gray_img
     gx = cv2.Sobel(img, cv2.CV_32F, 1, 0)
@@ -26,41 +24,6 @@ def _fast_nonmax_sup(img, win=11):
     peaks = cv2.compare(img, img_dilate, cv2.CMP_EQ)
     img[peaks == 0] = 0
 
-def _clip_bounding_points(pts, img_shape, winsize=10):
-    # Points are given in x,y coords, not r,c of the image shape
-    a = ~np.any(np.logical_or(pts <= winsize, pts[:, [1, 0]] >= np.array(img_shape) - winsize - 1), axis=1)
-    return pts[a, :]
-
-def _filter_x_corners(img, pts, winsize=5):
-    """
-    Filters points by examining their symmetry.
-    An internal X-corner is highly symmetric under a 180-degree rotation,
-    while T-corners on the board edge are anti-symmetric because they swap 
-    the board squares with the uniform border.
-    """
-    valid_pts = []
-    h, w = img.shape
-    for pt in pts:
-        x, y = int(pt[0]), int(pt[1])
-        if x - winsize < 0 or x + winsize >= w or y - winsize < 0 or y + winsize >= h:
-            continue
-            
-        patch = img[y - winsize : y + winsize + 1, x - winsize : x + winsize + 1].astype(np.float32)
-        patch_rot = np.rot90(patch, 2)
-        
-        # Calculate Normalized Cross Correlation (NCC)
-        patch_mean = np.mean(patch)
-        patch_rot_mean = np.mean(patch_rot)
-        num = np.sum((patch - patch_mean) * (patch_rot - patch_rot_mean))
-        den = np.sqrt(np.sum((patch - patch_mean)**2) * np.sum((patch_rot - patch_rot_mean)**2))
-        ncc = num / den if den > 0 else 0
-        
-        # Internal X-corners are symmetric (NCC > 0), edge T-corners are anti-symmetric (NCC < 0)
-        # We use a conservative threshold of 0.25 to allow for some perspective distortion
-        if ncc > 0.25:
-            valid_pts.append(pt)
-            
-    return np.array(valid_pts)
 
 def find_saddle_points(image: np.ndarray, max_pts: int = 0, filter_t_corners: bool = True) -> np.ndarray:
     """
@@ -101,12 +64,57 @@ def find_saddle_points(image: np.ndarray, max_pts: int = 0, filter_t_corners: bo
     sorted_indices = np.argsort(saddle_strengths)[::-1]
     spts = spts[sorted_indices]
     
-    # Filter T-corners based on intensity symmetry if requested
-    if filter_t_corners and len(spts) > 0:
-        spts = _filter_x_corners(gray, spts, winsize=5)
-
-    # Remove those points near winsize edges
-    spts = _clip_bounding_points(spts, gray.shape, winsize)
+    # Filter points
+    if len(spts) > 0 and filter_t_corners:
+        # 1. Edge Clipping
+        near_edge = np.logical_or(
+            np.any(spts <= winsize, axis=1),
+            np.any(spts[:, [1, 0]] >= np.array(gray.shape) - winsize - 1, axis=1)
+        )
+        
+        # 2. Vectorized Symmetry Filter (Rose Plot Symmetry)
+        h, w_img = gray.shape
+        mag = np.sqrt(gx**2 + gy**2)
+        ixs = np.round(spts[:, 0]).astype(int)
+        iys = np.round(spts[:, 1]).astype(int)
+        
+        # Ensure window is within image bounds for safe indexing
+        ixs_safe = np.clip(ixs, 5, w_img - 6)
+        iys_safe = np.clip(iys, 5, h - 6)
+        
+        # Precompute relative offsets for 40 square boundary pixels (clockwise)
+        dx = np.concatenate([np.arange(-5, 6), np.ones(9, dtype=int)*5, np.arange(5, -6, -1), np.ones(9, dtype=int)*-5])
+        dy = np.concatenate([np.ones(11, dtype=int)*-5, np.arange(-4, 5), np.ones(11, dtype=int)*5, np.arange(4, -5, -1)])
+        
+        # Extract all boundary rings at once: Shape (N, 40)
+        ring_mags = mag[iys_safe[:, None] + dy, ixs_safe[:, None] + dx]
+        
+        # Calculate magnitude symmetry score using 180-degree periodic correlation
+        row_sums = np.sum(ring_mags, axis=1, keepdims=True)
+        norm_mags = ring_mags / (row_sums + 1e-6)
+        scores = np.sum(norm_mags * np.roll(norm_mags, 20, axis=1), axis=1)
+        
+        # 3. Extract Intensity Ring for Point Symmetry
+        ring_intensities = gray[iys_safe[:, None] + dy, ixs_safe[:, None] + dx].astype(np.float32)
+        
+        # Calculate Intensity Symmetry (NCC on the ring)
+        # Subtract mean of each ring
+        ring_means = np.mean(ring_intensities, axis=1, keepdims=True)
+        ring_centered = ring_intensities - ring_means
+        
+        # 180-degree correlation (periodic shift by 20 in a 40-pixel ring)
+        ring_rot = np.roll(ring_centered, 20, axis=1)
+        num = np.sum(ring_centered * ring_rot, axis=1)
+        den = np.sqrt(np.sum(ring_centered**2, axis=1) * np.sum(ring_rot**2, axis=1))
+        # ncc_scores will be near 1.0 for symmetric corners, near -1.0 for anti-symmetric
+        ncc_scores = np.divide(num, den, out=np.zeros_like(num), where=den!=0)
+        
+        # Combined filter: high magnitude symmetry AND high intensity symmetry
+        # X-corners have 4 clear peaks (scores) and point symmetry (ncc_scores)
+        # NOTE : Hardcoded values here with some assumptions about input image scale etc.
+        valid_mask = ~near_edge & (scores >= 0.02) & (ncc_scores >= 0.2)
+            
+        spts = spts[valid_mask]
 
     # Take only the top max_pts
     if max_pts > 0 and len(spts) > max_pts:

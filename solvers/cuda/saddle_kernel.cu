@@ -52,7 +52,8 @@ __global__ void box_blur_kernel(const uint8_t* src, float* dst, int w, int h) {
             }
         }
     }
-    dst[y * w + x] = sum / count;
+    // Match OpenCV uint8 blur rounding
+    dst[y * w + x] = roundf(sum / count);
 }
 
 __global__ void sobel_kernel(const float* src, float* gx, float* gy, int w, int h) {
@@ -120,7 +121,7 @@ __global__ void sobel_second_and_saddle(const float* gx_img, const float* gy_img
     }
 }
 
-__global__ void extract_peaks(const float* S_img, const float* sub_s_img, const float* sub_t_img, const float* blur_img, SaddlePoint* out_pts, int* out_count, bool filter_t_corners, int w, int h) {
+__global__ void extract_peaks(const float* S_img, const float* sub_s_img, const float* sub_t_img, const float* gx_img, const float* gy_img, const float* blur_img, SaddlePoint* out_pts, int* out_count, bool filter_t_corners, int w, int h) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     int winsize = 10;
@@ -136,9 +137,6 @@ __global__ void extract_peaks(const float* S_img, const float* sub_s_img, const 
     for (int dy = -5; dy <= 5; dy++) {
         for (int dx = -5; dx <= 5; dx++) {
             if (dx == 0 && dy == 0) continue;
-            // Match cv2.dilate(img) == img logic
-            // If any neighbor is strictly greater, this is not a peak. 
-            // If they are equal, both can be considered peaks, but let's use >.
             if (S_img[(y + dy) * w + (x + dx)] > S) {
                 is_max = false;
                 break;
@@ -154,45 +152,65 @@ __global__ void extract_peaks(const float* S_img, const float* sub_s_img, const 
     float py = y + sub_t_img[y * w + x];
     
     // Boundary check again with subpixel coordinates
-    if (px <= winsize || py <= winsize || px >= w - winsize - 1.0f || py >= h - winsize - 1.0f) return;
+    if (px <= winsize || py <= winsize || px >= w - (float)winsize - 1.0f || py >= h - (float)winsize - 1.0f) return;
 
-    // T-Corner Filtering (NCC on 11x11 window)
     if (filter_t_corners) {
-        int r = 5;
-        float patch_mean = 0.0f;
-        float patch_rot_mean = 0.0f;
-        float num = 0.0f;
-        float sum_sq1 = 0.0f;
-        float sum_sq2 = 0.0f;
-        
-        // Compute means
-        for (int dy = -r; dy <= r; dy++) {
-            for (int dx = -r; dx <= r; dx++) {
-                float val1 = blur_img[(y + dy) * w + (x + dx)];
-                float val2 = blur_img[(y - dy) * w + (x - dx)];
-                patch_mean += val1;
-                patch_rot_mean += val2;
-            }
-        }
-        int N = (2 * r + 1) * (2 * r + 1);
-        patch_mean /= N;
-        patch_rot_mean /= N;
+        // Ring-based symmetry filtering (Rose Plot and Intensity NCC)
+        int dxs[40] = {-5,-4,-3,-2,-1, 0, 1, 2, 3, 4, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5,  5, 4, 3, 2, 1, 0,-1,-2,-3,-4,-5, -5,-5,-5,-5,-5,-5,-5,-5,-5};
+        int dys[40] = {-5,-5,-5,-5,-5,-5,-5,-5,-5,-5,-5, -4,-3,-2,-1, 0, 1, 2, 3, 4,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  4, 3, 2, 1, 0,-1,-2,-3,-4};
 
-        // Compute NCC
-        for (int dy = -r; dy <= r; dy++) {
-            for (int dx = -r; dx <= r; dx++) {
-                float v1 = blur_img[(y + dy) * w + (x + dx)] - patch_mean;
-                float v2 = blur_img[(y - dy) * w + (x - dx)] - patch_rot_mean;
-                num += v1 * v2;
-                sum_sq1 += v1 * v1;
-                sum_sq2 += v2 * v2;
-            }
+        float ring_mags[40];
+        float ring_vals[40];
+        float mag_sum = 0.0f;
+        float val_sum = 0.0f;
+
+        // Use rounded subpixel coordinates for the ring center (matches Python np.round)
+        int ix = (int)roundf(px);
+        int iy = (int)roundf(py);
+
+        // Safety clip (matches Python's ixs_safe)
+        if (ix < 5) ix = 5;
+        if (ix > w - 6) ix = w - 6;
+        if (iy < 5) iy = 5;
+        if (iy > h - 6) iy = h - 6;
+
+        for (int i = 0; i < 40; i++) {
+            int nx = ix + dxs[i];
+            int ny = iy + dys[i];
+            float gx = gx_img[ny * w + nx];
+            float gy = gy_img[ny * w + nx];
+            float mag = sqrtf(gx * gx + gy * gy);
+            float val = blur_img[ny * w + nx];
+            
+            ring_mags[i] = mag;
+            ring_vals[i] = val;
+            mag_sum += mag;
+            val_sum += val;
         }
-        float den = sqrtf(sum_sq1 * sum_sq2);
-        float ncc = (den > 0.0f) ? (num / den) : 0.0f;
-        
-        // Internal X-corners have NCC > 0 (symmetric). T-corners have NCC < 0 (anti-symmetric).
-        if (ncc <= 0.25f) return;
+
+        // 1. Rose Plot Magnitude Symmetry Score
+        float mag_score = 0.0f;
+        float mag_norm_denom = mag_sum + 1e-6f;
+        for (int i = 0; i < 40; i++) {
+            float m1 = ring_mags[i] / mag_norm_denom;
+            float m2 = ring_mags[(i + 20) % 40] / mag_norm_denom;
+            mag_score += m1 * m2;
+        }
+
+        // 2. Intensity NCC Symmetry Score
+        float val_mean = val_sum / 40.0f;
+        float ncc_num = 0.0f;
+        float ncc_den = 0.0f;
+        for (int i = 0; i < 40; i++) {
+            float v1 = ring_vals[i] - val_mean;
+            float v2 = ring_vals[(i + 20) % 40] - val_mean;
+            ncc_num += v1 * v2;
+            ncc_den += v1 * v1;
+        }
+        float ncc_score = (ncc_den > 0.0f) ? (ncc_num / ncc_den) : 0.0f;
+
+        // Thresholds matching Python (scores >= 0.02, ncc_scores >= 0.2)
+        if (mag_score < 0.02f || ncc_score < 0.2f) return;
     }
 
     // Add to global point list safely
@@ -261,7 +279,7 @@ EXPORT int find_saddle_points_cuda(const uint8_t* h_img, SaddlePoint* h_out_pts,
     sobel_second_and_saddle<<<grid, block>>>(g_d_gx, g_d_gy, g_d_S, g_d_sub_s, g_d_sub_t, w, h);
     
     // 4. Extract Peaks and Filter
-    extract_peaks<<<grid, block>>>(g_d_S, g_d_sub_s, g_d_sub_t, g_d_blur, g_d_out_pts, g_d_out_count, filter_t_corners, w, h);
+    extract_peaks<<<grid, block>>>(g_d_S, g_d_sub_s, g_d_sub_t, g_d_gx, g_d_gy, g_d_blur, g_d_out_pts, g_d_out_count, filter_t_corners, w, h);
 
     cudaDeviceSynchronize();
     cudaFree(d_img);

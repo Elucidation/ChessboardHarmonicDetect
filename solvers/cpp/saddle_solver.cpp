@@ -12,7 +12,7 @@
 #endif
 #endif
 
-#define MAX_POINTS 1000
+#define MAX_POINTS 10000
 
 struct SaddlePoint {
   float x;
@@ -20,10 +20,21 @@ struct SaddlePoint {
   float S;
 };
 
+static const int RING_SIZE = 40;
+static const int dx_ring[RING_SIZE] = {-5, -4, -3, -2, -1, 0,  1,  2,  3,  4,
+                                       5,  5,  5,  5,  5,  5,  5,  5,  5,  5,
+                                       5,  4,  3,  2,  1,  0,  -1, -2, -3, -4,
+                                       -5, -5, -5, -5, -5, -5, -5, -5, -5, -5};
+static const int dy_ring[RING_SIZE] = {-5, -5, -5, -5, -5, -5, -5, -5, -5, -5,
+                                       -5, -4, -3, -2, -1, 0,  1,  2,  3,  4,
+                                       5,  5,  5,  5,  5,  5,  5,  5,  5,  5,
+                                       5,  4,  3,  2,  1,  0,  -1, -2, -3, -4};
+
 // --- Persistent Buffers ---
 static std::vector<float> g_blur;
 static std::vector<float> g_gx;
 static std::vector<float> g_gy;
+static std::vector<float> g_mag;
 static std::vector<float> g_S;
 static std::vector<float> g_sub_s;
 static std::vector<float> g_sub_t;
@@ -40,6 +51,8 @@ EXPORT void free_saddle_resources_cpp() {
   g_gx.shrink_to_fit();
   g_gy.clear();
   g_gy.shrink_to_fit();
+  g_mag.clear();
+  g_mag.shrink_to_fit();
   g_S.clear();
   g_S.shrink_to_fit();
   g_sub_s.clear();
@@ -60,6 +73,7 @@ EXPORT int find_saddle_points_cpp(const uint8_t *h_img, SaddlePoint *h_out_pts,
     g_blur.resize(pixels);
     g_gx.resize(pixels);
     g_gy.resize(pixels);
+    g_mag.resize(pixels);
     g_S.resize(pixels);
     g_sub_s.resize(pixels);
     g_sub_t.resize(pixels);
@@ -84,7 +98,7 @@ EXPORT int find_saddle_points_cpp(const uint8_t *h_img, SaddlePoint *h_out_pts,
           }
         }
       }
-      g_blur[y * w + x] = sum / count;
+      g_blur[y * w + x] = std::round(sum / count);
     }
   }
 
@@ -109,6 +123,12 @@ EXPORT int find_saddle_points_cpp(const uint8_t *h_img, SaddlePoint *h_out_pts,
       g_gx[y * w + x] = -p00 + p02 - 2.0f * p10 + 2.0f * p12 - p20 + p22;
       g_gy[y * w + x] = -p00 - 2.0f * p01 - p02 + p20 + 2.0f * p21 + p22;
     }
+  }
+
+// 2.5 Calculate Magnitude
+#pragma omp parallel for
+  for (int i = 0; i < w * h; i++) {
+    g_mag[i] = std::sqrt(g_gx[i] * g_gx[i] + g_gy[i] * g_gy[i]);
   }
 
 // 3. Second Order Derivatives & Saddle values
@@ -149,7 +169,7 @@ EXPORT int find_saddle_points_cpp(const uint8_t *h_img, SaddlePoint *h_out_pts,
       float gx = g_gx[y * w + x];
       float gy = g_gy[y * w + x];
 
-      if (denom != 0.0f) {
+      if (std::abs(denom) > 1e-6f) {
         g_sub_s[y * w + x] = (gy * gxy - gx * gyy) / denom;
         g_sub_t[y * w + x] = (gx * gxy - gy * gxx) / denom;
       } else {
@@ -195,38 +215,63 @@ EXPORT int find_saddle_points_cpp(const uint8_t *h_img, SaddlePoint *h_out_pts,
         continue;
 
       if (filter_t_corners) {
-        int r = 5;
-        float patch_mean = 0.0f;
-        float patch_rot_mean = 0.0f;
+        float ring_mags[RING_SIZE];
+        float ring_intensities[RING_SIZE];
+        float sum_mag = 0.0f;
+        float sum_intensity = 0.0f;
+
+        // Use rounded subpixel coordinates for the ring center (matches Python
+        // np.round)
+        int ix = (int)std::rint(px);
+        int iy = (int)std::rint(py);
+
+        // Safety clip (matches Python's ixs_safe)
+        if (ix < 5)
+          ix = 5;
+        if (ix > w - 6)
+          ix = w - 6;
+        if (iy < 5)
+          iy = 5;
+        if (iy > h - 6)
+          iy = h - 6;
+
+        for (int i = 0; i < RING_SIZE; i++) {
+          int nx = ix + dx_ring[i];
+          int ny = iy + dy_ring[i];
+          int idx = ny * w + nx;
+          ring_mags[i] = g_mag[idx];
+          sum_mag += ring_mags[i];
+
+          ring_intensities[i] = g_blur[idx];
+          sum_intensity += ring_intensities[i];
+        }
+
+        // 1. Magnitude symmetry score (Rose Plot Symmetry)
+        float score = 0.0f;
+        if (sum_mag > 1e-6f) {
+          float sum_prod = 0.0f;
+          for (int i = 0; i < RING_SIZE; i++) {
+            sum_prod +=
+                ring_mags[i] * ring_mags[(i + RING_SIZE / 2) % RING_SIZE];
+          }
+          score = sum_prod / (sum_mag * sum_mag);
+        }
+
+        // 2. Intensity symmetry (NCC on the ring)
+        float intensity_mean = sum_intensity / (float)RING_SIZE;
         float num = 0.0f;
-        float sum_sq1 = 0.0f;
-        float sum_sq2 = 0.0f;
-
-        for (int dy = -r; dy <= r; dy++) {
-          for (int dx = -r; dx <= r; dx++) {
-            float val1 = g_blur[(y + dy) * w + (x + dx)];
-            float val2 = g_blur[(y - dy) * w + (x - dx)];
-            patch_mean += val1;
-            patch_rot_mean += val2;
-          }
+        float den = 0.0f;
+        for (int i = 0; i < RING_SIZE; i++) {
+          float v1 = ring_intensities[i] - intensity_mean;
+          float v2 = ring_intensities[(i + RING_SIZE / 2) % RING_SIZE] -
+                     intensity_mean;
+          num += v1 * v2;
+          den += v1 * v1;
         }
-        int N = (2 * r + 1) * (2 * r + 1);
-        patch_mean /= N;
-        patch_rot_mean /= N;
+        float ncc = (den > 1e-6f) ? (num / den) : 0.0f;
 
-        for (int dy = -r; dy <= r; dy++) {
-          for (int dx = -r; dx <= r; dx++) {
-            float v1 = g_blur[(y + dy) * w + (x + dx)] - patch_mean;
-            float v2 = g_blur[(y - dy) * w + (x - dx)] - patch_rot_mean;
-            num += v1 * v2;
-            sum_sq1 += v1 * v1;
-            sum_sq2 += v2 * v2;
-          }
-        }
-        float den = std::sqrt(sum_sq1 * sum_sq2);
-        float ncc = (den > 0.0f) ? (num / den) : 0.0f;
-
-        if (ncc <= 0.25f)
+        // Combined filter: high magnitude symmetry AND high intensity symmetry
+        if (score < 0.02f || ncc < 0.2f)
           continue;
       }
 

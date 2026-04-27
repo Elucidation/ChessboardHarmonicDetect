@@ -63,8 +63,8 @@ def find_saddle_points(image: np.ndarray, max_pts: int = 0, filter_t_corners: bo
         
     h, w = gray.shape
     
-    # Allocate output buffer (maximum 1000 points expected)
-    out_pts = (SaddlePoint * 1000)()
+    # Allocate output buffer (maximum 10000 points expected)
+    out_pts = (SaddlePoint * 10000)()
     img_ptr = gray.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8))
     
     # Run C++ Kernel

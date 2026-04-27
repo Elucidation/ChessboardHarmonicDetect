@@ -1,17 +1,5 @@
 # ChessboardHarmonicDetect
-Detects chessboard poses from images by locating saddle points and using harmonic analysis, runs in ~10 ms on CPU, ~1ms on GPU. 
-
-Try it yourself with the [Web Demo](https://elucidation.github.io/ChessboardHarmonicDetect/).
-
-[<img src="docs/live_demo_screenshot.jpg" width="500">](https://elucidation.github.io/ChessboardHarmonicDetect/)
-
-Here is the output from the [`usage_example.py`](usage_example.py) script showing it working.
-
-<img src="outputs/output_plot_1.png" width="500">
-
-I also made a [youtube video](https://youtu.be/ikdNyfMvQsA?si=wtFThdHmDZqxIK-M) explaining how the algorithm works:
-
-[![ChessboardPoseEstimation_YouTube](https://img.youtube.com/vi/ikdNyfMvQsA/mqdefault.jpg)](https://youtu.be/ikdNyfMvQsA?si=wtFThdHmDZqxIK-M)
+Detects chessboard poses (homographies) from images by locating saddle points and using harmonic analysis, runs in ~4 ms on CPU, faster on GPU.
 
 If you use this code, please cite it as below:
 
@@ -20,13 +8,38 @@ If you use this code, please cite it as below:
 
 This currently uses only computer vision algorithms, no machine learning. It can be greatly improved with ML to refine the points passed in.
 
+---
+
+Try it yourself with the [Web Demo](https://elucidation.github.io/ChessboardHarmonicDetect/).
+
+[<img src="docs/live_demo_screenshot.jpg" width="500">](https://elucidation.github.io/ChessboardHarmonicDetect/)
+
+Here is the output from the [`benchmark.py`](benchmark.py) script showing it working.
+
+<img src="outputs/cpp/out_1.png" width="500">
+
+I also made a [youtube video](https://youtu.be/ikdNyfMvQsA?si=wtFThdHmDZqxIK-M) explaining how the algorithm works:
+
+[![ChessboardPoseEstimation_YouTube](https://img.youtube.com/vi/ikdNyfMvQsA/mqdefault.jpg)](https://youtu.be/ikdNyfMvQsA?si=wtFThdHmDZqxIK-M)
+
+
 ## Solvers & Performance
 
 There are three different implementations of the sub-pixel saddle point detection logic to suit different hardware and latency requirements. The implementations are strictly tested to be mathematically consistent.
 
-- **CUDA Solver (`solvers/cuda`)**: The fastest raw execution time (~0.5ms). However, it requires an NVIDIA GPU and incurs a one-time ~90ms CUDA context initialization penalty on the first run, this would be the best choice for real-time use cases.
-- **C++ CPU Solver (`solvers/cpp`)**: An OpenMP multi-threaded CPU implementation. It's faster (~6ms) than the Python solver without any initialization overhead.
-- **Python Solver (`solvers/python`)**: The default, highly-portable OpenCV implementation. It runs entirely in Python and takes (~16ms).
+```
+========================================
+BENCHMARK SUMMARY (50 trials, randomized order)
+========================================
+CUDA    : Saddle   0.48 ms (±0.07) | Harmonic  2.24 ms | Total   2.72 ms
+C++     : Saddle   1.06 ms (±0.19) | Harmonic  2.28 ms | Total   3.33 ms
+Python  : Saddle  16.44 ms (±0.69) | Harmonic  2.29 ms | Total  18.73 ms
+========================================
+```
+
+- **CUDA Solver (`solvers/cuda`)**: The fastest raw execution time (~0.5ms). However, it requires an NVIDIA GPU and incurs a one-time ~100ms CUDA context initialization penalty on the first run, this would be the best choice for real-time use cases.
+- **C++ CPU Solver (`solvers/cpp`)**: An OpenMP multi-threaded CPU implementation. It's faster (~1ms) than the Python solver without lower initialization overhead.
+- **Python Solver (`solvers/python`)**: The default, highly-portable OpenCV implementation. It runs entirely in Python (besides using OpenCV) and takes (~17ms).
 - **WebGPU Solver (`web/`)**: A purely client-side browser implementation that uses custom `WGSL` compute shaders for saddle detection and a JavaScript port of the harmonic solver. It achieves high performance natively in the browser without any server backend.
 
 ## Web Application
@@ -36,18 +49,25 @@ This is a self-contained HTML web application that runs the entire detection pip
 - Serve the `web_standalone` folder: `python -m http.server 8000`
 - Open `http://localhost:8000/chessboard_detect.html`
 
-## Usage
-
 Run the usage example to visualize the detection pipeline. You can use the `--solver` flag to benchmark the different implementations (`python`, `cpp`, `cuda`, or `all`).
+
+### Simple Example
+If you just want to run the detection on a single image using the Python solver:
+```bash
+python usage_example.py
+```
+
+### Benchmarking Example
+To run all solvers and compare performance:
 
 Run all solvers and save to default output folders:
 ```bash
-python usage_example.py --input input_images/3.png
+python benchmark.py --input input_images/3.png
 ```
 
 Save to file using the C++ solver:
 ```bash
-python usage_example.py --solver cpp --input input_images/3.png --output outputs/output_plot.png
+python benchmark.py --solver cpp --input input_images/3.png --output outputs/output_plot.png
 ```
 
 ## Unit Tests
@@ -63,7 +83,8 @@ python -m pytest -v -s tests/test_solvers.py
 
 - **`solvers/`**: Directory containing the Python, C++, and CUDA implementations of the sub-pixel saddle point detection (X-corners).
 - **`harmonic_solver.py`**: Estimates the 2D chessboard lattice and homography matrix from saddle points.
-- **`usage_example.py`**: End-to-end usage example with matplotlib visualization.
+- **`usage_example.py`**: A clean, easy-to-read example of the core detection pipeline.
+- **`benchmark.py`**: A comprehensive benchmarking and visualization script for all solvers.
 - **`utils_visualize.py`**: Some functions to do the example matplotlib overlay.
 - **`tests/test_solvers.py`**: Unit tests validating that solvers produce identical outputs despite precision differences.
 
@@ -93,11 +114,7 @@ python -m pytest -v -s tests/test_solvers.py
 
 ## All Outputs
 
-![output 0](outputs/output_plot_0.png)
-
-![output 1](outputs/output_plot_1.png)
-
-![output 2](outputs/output_plot_2.png)
-
-![output 3](outputs/output_plot_3.png)
-
+|  |  |
+|:-:|:-:|
+| ![output 0](outputs/cpp/out_0.png) | ![output 1](outputs/cpp/out_1.png) |
+| ![output 2](outputs/cpp/out_2.png) | ![output 3](outputs/cpp/out_3.png) |
