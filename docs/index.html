@@ -1046,9 +1046,9 @@ fn nms_pass(@builtin(global_invocation_id) global_id: vec3<u32>) {
         });
         this.device.queue.writeBuffer(counterBuf, 0, new Uint32Array([0]));
 
-        // Readback buffer
+        // Readback buffer: counter + points + blur + saddle + gx + gy
         const readbackBuf = this.device.createBuffer({
-          size: 4 + maxPoints * 5 * 4 + bufferSize * 2, // counter + points + blur data + saddle data
+          size: 4 + maxPoints * 5 * 4 + bufferSize * 4, // counter + points + blur + saddle + gx + gy
           usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
         });
 
@@ -1098,11 +1098,13 @@ fn nms_pass(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pass4.dispatchWorkgroups(workgroupCountX, workgroupCountY);
         pass4.end();
 
-        // Copy results
+        // Copy results: counter, points, blur, saddle, gx, gy
         commandEncoder.copyBufferToBuffer(counterBuf, 0, readbackBuf, 0, 4);
         commandEncoder.copyBufferToBuffer(pointsBuf, 0, readbackBuf, 4, maxPoints * 5 * 4);
         commandEncoder.copyBufferToBuffer(blurBuf, 0, readbackBuf, 4 + maxPoints * 5 * 4, bufferSize);
         commandEncoder.copyBufferToBuffer(saddleBuf, 0, readbackBuf, 4 + maxPoints * 5 * 4 + bufferSize, bufferSize);
+        commandEncoder.copyBufferToBuffer(gxBuf, 0, readbackBuf, 4 + maxPoints * 5 * 4 + bufferSize * 2, bufferSize);
+        commandEncoder.copyBufferToBuffer(gyBuf, 0, readbackBuf, 4 + maxPoints * 5 * 4 + bufferSize * 3, bufferSize);
 
         this.device.queue.submit([commandEncoder.finish()]);
 
@@ -1115,6 +1117,8 @@ fn nms_pass(@builtin(global_invocation_id) global_id: vec3<u32>) {
         const pointsData = new Float32Array(arrayBuffer, 4, count * 5).slice();
         const blurData = new Float32Array(arrayBuffer, 4 + maxPoints * 5 * 4, numPixels).slice();
         const saddleData = new Float32Array(arrayBuffer, 4 + maxPoints * 5 * 4 + bufferSize, numPixels).slice();
+        const gxData = new Float32Array(arrayBuffer, 4 + maxPoints * 5 * 4 + bufferSize * 2, numPixels).slice();
+        const gyData = new Float32Array(arrayBuffer, 4 + maxPoints * 5 * 4 + bufferSize * 3, numPixels).slice();
 
         // Parse points and sort by score
         const points = [];
@@ -1150,47 +1154,84 @@ fn nms_pass(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // Convert to simple array format [x, y, score]
         const parsedPoints = points.map(p => [p.x, p.y, p.score]);
 
-        // Apply NCC symmetry filter to remove T-corners and false positives
+        // --- Ring-based symmetry filter (matches Python / C++ / CUDA solvers) ---
+        // Uses a 40-pixel ring at the perimeter of a 5-radius square, clockwise.
+        // For each candidate point we compute:
+        //   1. Magnitude symmetry score (rose plot): normalised dot product with 180° shift, >= 0.02
+        //   2. Intensity NCC on the ring (180° shift by 20), >= 0.2
+        // Both must pass; edge points (winsize=10) are rejected first.
+
+        // Precompute the 40-pixel ring offsets (same order as Python / C++ / CUDA)
+        const RING_DX = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 4, 3, 2, 1, 0, -1, -2, -3, -4, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5];
+        const RING_DY = [-5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 4, 3, 2, 1, 0, -1, -2, -3, -4];
+        const RING_SIZE = 40;
+        const RING_HALF = 20; // 180° shift index
+        const winsize = 10;
+
         const validPoints = [];
-        const winsize = 5;
-        const getBlur = (x, y) => {
-          const idx = y * width + x;
-          return blurData[idx];
-        };
 
         for (const pt of parsedPoints) {
-          const px = Math.round(pt[0]);
-          const py = Math.round(pt[1]);
-          if (px - winsize < 0 || px + winsize >= width || py - winsize < 0 || py + winsize >= height) {
+          const px = pt[0];
+          const py = pt[1];
+
+          // 1. Edge clip (winsize=10, matching Python / C++ / CUDA)
+          if (px <= winsize || py <= winsize || px >= width - winsize - 1 || py >= height - winsize - 1) {
             continue;
           }
 
-          const patch = new Float32Array(121);
-          let sum = 0;
-          let idx = 0;
-          for (let dy = -winsize; dy <= winsize; dy++) {
-            for (let dx = -winsize; dx <= winsize; dx++) {
-              const val = getBlur(px + dx, py + dy);
-              patch[idx] = val;
-              sum += val;
-              idx++;
-            }
+          // Use rounded subpixel coordinates for the ring centre (matches np.round)
+          let ix = Math.round(px);
+          let iy = Math.round(py);
+
+          // Safety clip (matches Python ixs_safe / C++ clip)
+          ix = Math.max(5, Math.min(width - 6, ix));
+          iy = Math.max(5, Math.min(height - 6, iy));
+
+          // Sample the 40-pixel ring for magnitude and intensity
+          const ringMags = new Float32Array(RING_SIZE);
+          const ringVals = new Float32Array(RING_SIZE);
+          let magSum = 0.0;
+          let valSum = 0.0;
+
+          for (let k = 0; k < RING_SIZE; k++) {
+            const nx = ix + RING_DX[k];
+            const ny = iy + RING_DY[k];
+            const idx = ny * width + nx;
+            const gx = gxData[idx];
+            const gy = gyData[idx];
+            const mag = Math.sqrt(gx * gx + gy * gy);
+            ringMags[k] = mag;
+            ringVals[k] = blurData[idx];
+            magSum += mag;
+            valSum += ringVals[k];
           }
 
-          const mean = sum / 121;
-          let num = 0, den1 = 0, den2 = 0;
-          for (let i = 0; i < 121; i++) {
-            const a = patch[i] - mean;
-            const b = patch[120 - i] - mean; // 180-degree rotation
-            num += a * b;
-            den1 += a * a;
-            den2 += b * b;
+          // 2a. Magnitude symmetry score (rose plot)
+          // Normalise by total sum (matching Python: norm_mags = ring_mags / row_sum)
+          const magNormDenom = magSum + 1e-6;
+          let magScore = 0.0;
+          for (let k = 0; k < RING_SIZE; k++) {
+            magScore += (ringMags[k] / magNormDenom) * (ringMags[(k + RING_HALF) % RING_SIZE] / magNormDenom);
           }
 
-          const den = Math.sqrt(den1 * den2);
-          const ncc = den > 0 ? num / den : 0;
+          if (magScore < 0.02) continue;
 
-          if (ncc > 0.25) {
+          // 2b. Intensity NCC on the ring (180° shift by 20)
+          const valMean = valSum / RING_SIZE;
+          let nccNum = 0.0;
+          let nccDen1 = 0.0;
+          let nccDen2 = 0.0;
+          for (let k = 0; k < RING_SIZE; k++) {
+            const v1 = ringVals[k] - valMean;
+            const v2 = ringVals[(k + RING_HALF) % RING_SIZE] - valMean;
+            nccNum += v1 * v2;
+            nccDen1 += v1 * v1;
+            nccDen2 += v2 * v2;
+          }
+          const nccDen = Math.sqrt(nccDen1 * nccDen2);
+          const ncc = nccDen > 0 ? nccNum / nccDen : 0;
+
+          if (ncc >= 0.2) {
             validPoints.push(pt);
           }
         }
