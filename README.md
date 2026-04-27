@@ -6,7 +6,7 @@ If you use this code, please cite it as below:
     Ansari, S. (2026). ChessboardHarmonicDetect (Version 1.0.0) [Computer software]. https://github.com/Elucidation/ChessboardHarmonicDetect
 
 
-This currently uses only computer vision algorithms, no machine learning. It can be greatly improved with ML to refine the points passed in.
+This currently uses only computer vision algorithms, no machine learning. It can be greatly improved with ML to refine the points passed in. My [ChessboardDetect git repo](https://github.com/Elucidation/ChessboardDetect#readme) explores that.
 
 ---
 
