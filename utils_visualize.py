@@ -52,8 +52,6 @@ def visualize_reconstruction(image: np.ndarray, lattice_points: np.ndarray,
         homography_matrix (np.ndarray): Estimated homography matrix of shape (3, 3).
         basis_vectors (np.ndarray): Estimated basis vectors of the lattice of shape (2, 2).
     """
-    from scipy.ndimage import gaussian_filter
-    from skimage.feature import peak_local_max
     
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     if timing_str:

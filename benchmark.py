@@ -52,7 +52,7 @@ def load_and_plot_saddles(image_path: str, img_size: tuple = (640, 480), output_
         t_warmup = time.time() - t_start
         print(f"C++ init took {t_warmup*1000:.1f} ms. NOTE: One-time initialization cost.")
 
-    # Warm up the harmonic solver (SciPy/NumPy overhead)
+    # Warm up the harmonic solver
     t_start = time.time()
     dummy_points = np.random.rand(50, 2).astype(np.float64)
     _ = estimate_chess_grid(dummy_points)

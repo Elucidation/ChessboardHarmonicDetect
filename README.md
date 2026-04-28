@@ -1,12 +1,12 @@
 # ChessboardHarmonicDetect
-Detects chessboard poses (homographies) from images by locating saddle points and using harmonic analysis, runs in ~4 ms on CPU, faster on GPU.
+Detects chessboard poses (homographies) from images via saddle point and harmonic analysis, runs in ~2 ms on CPU, faster on GPU.
 
 If you use this code, please cite it as below:
 
     Ansari, S. (2026). ChessboardHarmonicDetect (Version 1.0.0) [Computer software]. https://github.com/Elucidation/ChessboardHarmonicDetect
 
 
-This currently uses only computer vision algorithms, no machine learning. It can be greatly improved with ML to refine the points passed in. My [ChessboardDetect git repo](https://github.com/Elucidation/ChessboardDetect#readme) explores that.
+This currently uses only computer vision algorithms, no machine learning. It can be greatly improved with ML to refine the points passed in. [ChessboardDetect](https://github.com/Elucidation/ChessboardDetect#readme) explores that approach.
 
 ---
 
@@ -31,9 +31,9 @@ There are three different implementations of the sub-pixel saddle point detectio
 ========================================
 BENCHMARK SUMMARY (50 trials, randomized order)
 ========================================
-CUDA    : Saddle   0.48 ms (±0.07) | Harmonic  2.24 ms | Total   2.72 ms
-C++     : Saddle   1.06 ms (±0.19) | Harmonic  2.28 ms | Total   3.33 ms
-Python  : Saddle  16.44 ms (±0.69) | Harmonic  2.29 ms | Total  18.73 ms
+CUDA    : Saddle   0.52 ms (±0.06) | Harmonic  0.73 ms | Total   1.25 ms
+C++     : Saddle   1.18 ms (±0.21) | Harmonic  0.78 ms | Total   1.96 ms
+Python  : Saddle  16.26 ms (±0.52) | Harmonic  0.74 ms | Total  17.00 ms
 ========================================
 ```
 
