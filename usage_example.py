@@ -5,7 +5,7 @@ import os
 
 # Import the core components
 from solvers.python.saddle_solver import find_saddle_points
-from harmonic_solver import estimate_chess_grid, estimate_homography
+from solvers.harmonic_solver import estimate_chess_grid, estimate_homography
 from utils_visualize import visualize_reconstruction
 
 def run_simple_detection(image_path: str, output_path: str = "output_simple.png"):

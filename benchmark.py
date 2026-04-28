@@ -12,7 +12,7 @@ from tqdm import tqdm
 from solvers.cuda.cuda_saddle_solver import find_saddle_points as find_saddle_points_cuda
 from solvers.cpp.cpp_saddle_solver import find_saddle_points as find_saddle_points_cpp
 from solvers.python.saddle_solver import find_saddle_points as find_saddle_points_py
-from harmonic_solver import estimate_chess_grid, estimate_homography
+from solvers.harmonic_solver import estimate_chess_grid, estimate_homography
 from utils_visualize import visualize_reconstruction
 
 def load_and_plot_saddles(image_path: str, img_size: tuple = (640, 480), output_path: str = None, 
