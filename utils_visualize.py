@@ -5,8 +5,7 @@ import matplotlib.pyplot as plt
 
 def draw_checkerboard_on_image(image, homography, alpha_blend=0.4) -> np.ndarray:
     """
-    Draws a warped checkerboard pattern on an image using a homography.
-    The checkerboard is defined as a centered 8x8 grid in "lattice space".
+    Draws a checkerboard pattern on an image using a homography.
     """
     if homography is None:
         return image
@@ -36,6 +35,129 @@ def draw_checkerboard_on_image(image, homography, alpha_blend=0.4) -> np.ndarray
                 cv2.fillPoly(overlay, [corners], color)
 
     final_img = cv2.addWeighted(overlay, alpha_blend, image, 1 - alpha_blend, 0)
+    return final_img
+
+def draw_board_grid_on_image(image, homography, alpha_blend=0.4) -> np.ndarray:
+    """
+    Draws a chessboard grid pattern on an image using a homography.
+    """
+    if homography is None:
+        return image
+    
+    rows, cols = 8, 8
+    # Notice the order: y, x for meshgrid to match the vertex ordering
+    y, x = np.meshgrid(np.arange(-4, -4+rows+1), np.arange(-4, -4+cols+1))
+    object_points = np.stack((x.ravel(), y.ravel()), axis=-1).astype(np.float32)
+    warped_points = cv2.perspectiveTransform(object_points.reshape(-1, 1, 2), homography)
+    # Ensure image is in 8-bit RGB format for consistent drawing
+    if len(image.shape) == 2:
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+    elif image.shape[2] == 4:
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
+    else:
+        image_rgb = image.copy()
+        
+    if image_rgb.dtype != np.uint8:
+        if np.max(image_rgb) <= 1.01:
+            image_rgb = (image_rgb * 255).astype(np.uint8)
+        else:
+            image_rgb = image_rgb.astype(np.uint8)
+
+    overlay = image_rgb.copy()
+    
+    if warped_points is not None:
+        warped_points = warped_points.reshape(-1, 2).astype(np.int32)
+        verts_per_row = cols + 1
+        for r in range(rows):
+            for c in range(cols):
+                p1_idx = r * verts_per_row + c
+                p2_idx = p1_idx + 1
+                p3_idx = (r + 1) * verts_per_row + c
+                p4_idx = p3_idx + 1
+                corners = np.array([warped_points[p1_idx], warped_points[p2_idx], warped_points[p4_idx], warped_points[p3_idx]])
+                
+                # Image is in RGB, so (0, 255, 0) is green, (255, 0, 0) is red
+                color = (0, 255, 0) if (r + c) % 2 == 0 else (255, 0, 0)
+                cv2.fillPoly(overlay, [corners], color)
+
+    final_img = cv2.addWeighted(overlay, alpha_blend, image_rgb, 1 - alpha_blend, 0)
+    return final_img
+
+def draw_board_grid_on_image(image, homography, alpha_blend=0.4) -> np.ndarray:
+    """
+    Draws a board grid pattern on an image using a homography.
+    The board is defined as a centered 8x8 grid in "lattice space".
+    """
+    if homography is None:
+        return image
+    
+    rows, cols = 8, 8
+    # Notice the order: y, x for meshgrid to match the vertex ordering
+    y, x = np.meshgrid(np.arange(-4, -4+rows+1), np.arange(-4, -4+cols+1))
+    object_points = np.stack((x.ravel(), y.ravel()), axis=-1).astype(np.float32)
+    warped_points = cv2.perspectiveTransform(object_points.reshape(-1, 1, 2), homography)
+    # Ensure image is in 8-bit RGB format for consistent drawing
+    if len(image.shape) == 2:
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+    elif image.shape[2] == 4:
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
+    else:
+        image_rgb = image.copy()
+        
+    if image_rgb.dtype != np.uint8:
+        if np.max(image_rgb) <= 1.01:
+            image_rgb = (image_rgb * 255).astype(np.uint8)
+        else:
+            image_rgb = image_rgb.astype(np.uint8)
+
+    overlay = image_rgb.copy()
+    
+    if warped_points is not None:
+        warped_points = warped_points.reshape(-1, 2).astype(np.int32)
+        verts_per_row = cols + 1
+        green = (0, 255, 0)
+        yellow = (255, 255, 0)
+        red = (255, 0, 0)
+        blue = (0, 0, 255)
+        line_thickness = 4
+
+        # Draw internal horizontal grid lines (rows 1..rows-1)
+        for r in range(1, rows):
+            for c in range(cols):
+                pt_a = tuple(warped_points[r * verts_per_row + c])
+                pt_b = tuple(warped_points[r * verts_per_row + c + 1])
+                cv2.line(overlay, pt_a, pt_b, yellow, line_thickness)
+
+        # Draw internal vertical grid lines (cols 1..cols-1)
+        for c in range(1, cols):
+            for r in range(rows):
+                pt_a = tuple(warped_points[r * verts_per_row + c])
+                pt_b = tuple(warped_points[(r + 1) * verts_per_row + c])
+                cv2.line(overlay, pt_a, pt_b, yellow, line_thickness)
+
+        # Draw outer perimeter in yellow
+        # Top edge (row 0)
+        for c in range(cols):
+            pt_a = tuple(warped_points[c])
+            pt_b = tuple(warped_points[c + 1])
+            cv2.line(overlay, pt_a, pt_b, green, line_thickness)
+        # Bottom edge (row = rows)
+        for c in range(cols):
+            pt_a = tuple(warped_points[rows * verts_per_row + c])
+            pt_b = tuple(warped_points[rows * verts_per_row + c + 1])
+            cv2.line(overlay, pt_a, pt_b, green, line_thickness)
+        # Left edge (col 0)
+        for r in range(rows):
+            pt_a = tuple(warped_points[r * verts_per_row])
+            pt_b = tuple(warped_points[(r + 1) * verts_per_row])
+            cv2.line(overlay, pt_a, pt_b, green, line_thickness)
+        # Right edge (col = cols)
+        for r in range(rows):
+            pt_a = tuple(warped_points[r * verts_per_row + cols])
+            pt_b = tuple(warped_points[(r + 1) * verts_per_row + cols])
+            cv2.line(overlay, pt_a, pt_b, green, line_thickness)
+
+    final_img = cv2.addWeighted(overlay, alpha_blend, image_rgb, 1 - alpha_blend, 0)
     return final_img
 
 def visualize_reconstruction(image: np.ndarray, lattice_points: np.ndarray, 
@@ -119,8 +241,8 @@ def visualize_reconstruction(image: np.ndarray, lattice_points: np.ndarray,
     axes[2].grid(True, linestyle='--', alpha=0.5)
     axes[2].invert_yaxis()
     
-    # 4. 2D Histogram & Peaks
-    axes[3].set_title("2D Histogram & Peaks")
+    # 4. 2D Histogram, Peaks & Harmonics
+    axes[3].set_title("2D Histogram, Peaks & Harmonics")
     if debug_info is not None and 'density_map' in debug_info:
         density_map = debug_info['density_map']
         extent = debug_info['extent']
@@ -129,14 +251,27 @@ def visualize_reconstruction(image: np.ndarray, lattice_points: np.ndarray,
         axes[3].imshow(density_map, origin='lower', extent=extent, cmap='viridis')
         if len(peak_vecs) > 0:
             axes[3].scatter(peak_vecs[:, 0], peak_vecs[:, 1], c='red', marker='x', s=40)
+
+        # Draw dotted lines along basis vector directions (same colors as displacement graph)
+        if basis_vectors is not None and len(basis_vectors) >= 2:
+            basis_colors = ['cyan', 'magenta']
+            for i, color in enumerate(basis_colors):
+                v = basis_vectors[i]
+                axes[3].plot([-10*v[0], 10*v[0]], [-10*v[1], 10*v[1]],
+                             color=color, linestyle=':', linewidth=1.5)
+
             
-    axes[3].set_aspect('equal')
+        # Lock axes to histogram extent so the dotted lines don't zoom out
+        axes[3].set_xlim(extent[0], extent[1])
+        axes[3].set_ylim(extent[2], extent[3])
+    
+    axes[3].set_aspect('auto')
     axes[3].set_xlabel('Dx (px)')
     axes[3].set_ylabel('Dy (px)')
     axes[3].invert_yaxis()
 
     # 5. Chessboard Overlay
-    img_overlay = draw_checkerboard_on_image(image, homography_matrix, alpha_blend=0.4)
+    img_overlay = draw_board_grid_on_image(image, homography_matrix, alpha_blend=0.9)
     axes[4].imshow(img_overlay)
     axes[4].set_title("Reconstructed Chessboard")
     axes[4].axis('off')

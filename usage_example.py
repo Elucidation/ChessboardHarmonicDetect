@@ -16,7 +16,7 @@ def run_simple_detection(image_path: str, output_path: str = "output_simple.png"
     # 1. Load and resize image
     # The saddle solver is tuned for images around 640x480
     image = np.array(Image.open(image_path))
-    image = cv2.resize(image, (640, 480))
+    image = cv2.resize(image, (640, 480), interpolation=cv2.INTER_AREA)
     
     print("Finding saddle points...")
     # 2. Detect saddle points (X-corners)

@@ -29,7 +29,7 @@ def load_and_plot_saddles(image_path: str, img_size: tuple = (640, 480), output_
     """
     # 1. Load the image
     image = np.array(Image.open(image_path))
-    image = cv2.resize(image, img_size)
+    image = cv2.resize(image, img_size, interpolation=cv2.INTER_AREA)
     
     solvers_to_run = []
     if solver_choice in ['all', 'cuda']: solvers_to_run.append(('CUDA', find_saddle_points_cuda)) # ~1ms
