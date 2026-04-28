@@ -319,3 +319,5 @@ def visualize_reconstruction(image: np.ndarray, lattice_points: np.ndarray,
         print(f"Saved visualization to {output_path}")
     else:
         plt.show()
+    
+    plt.close(fig)
