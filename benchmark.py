@@ -51,14 +51,6 @@ def load_and_plot_saddles(image_path: str, img_size: tuple = (640, 480), output_
         _ = find_saddle_points_cpp(np.random.randint(0, 255, size=(img_size[1], img_size[0])).astype(np.uint8), max_pts=50, filter_t_corners=True)
         t_warmup = time.time() - t_start
         print(f"C++ init took {t_warmup*1000:.1f} ms. NOTE: One-time initialization cost.")
-
-    # Warm up the harmonic solver (SciPy/NumPy overhead)
-    t_start = time.time()
-    dummy_points = np.random.rand(50, 2).astype(np.float64)
-    _ = estimate_chess_grid(dummy_points)
-    t_warmup = time.time() - t_start
-    print(f"Harmonic init took {t_warmup*1000:.1f} ms. NOTE: One-time initialization cost.")
-
     
     stats = {name: {'saddle': [], 'harmonic': []} for name, _ in solvers_to_run}
     # Store one set of results per solver for final visualization

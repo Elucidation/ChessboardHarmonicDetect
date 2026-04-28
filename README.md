@@ -1,12 +1,12 @@
 # ChessboardHarmonicDetect
-Detects chessboard poses (homographies) from images by locating saddle points and using harmonic analysis, runs in ~4 ms on CPU, faster on GPU.
+Detects chessboard poses (homographies) from images via saddle point and harmonic analysis, runs in ~2 ms on CPU, faster on GPU.
 
 If you use this code, please cite it as below:
 
     Ansari, S. (2026). ChessboardHarmonicDetect (Version 1.0.0) [Computer software]. https://github.com/Elucidation/ChessboardHarmonicDetect
 
 
-This currently uses only computer vision algorithms, no machine learning. It can be greatly improved with ML to refine the points passed in. My [ChessboardDetect git repo](https://github.com/Elucidation/ChessboardDetect#readme) explores that.
+This currently uses only computer vision algorithms, no machine learning. It can be greatly improved with ML to refine the points passed in. [ChessboardDetect](https://github.com/Elucidation/ChessboardDetect#readme) explores that approach.
 
 ---
 
@@ -28,17 +28,20 @@ I also made a [youtube video](https://youtu.be/ikdNyfMvQsA?si=wtFThdHmDZqxIK-M) 
 There are three different implementations of the sub-pixel saddle point detection logic to suit different hardware and latency requirements. The implementations are strictly tested to be mathematically consistent.
 
 ```
+CUDA init took 99.5 ms. NOTE: One-time initialization cost.
+C++ init took 7.3 ms. NOTE: One-time initialization cost.
+...
 ========================================
 BENCHMARK SUMMARY (50 trials, randomized order)
 ========================================
-CUDA    : Saddle   0.48 ms (±0.07) | Harmonic  2.24 ms | Total   2.72 ms
-C++     : Saddle   1.06 ms (±0.19) | Harmonic  2.28 ms | Total   3.33 ms
-Python  : Saddle  16.44 ms (±0.69) | Harmonic  2.29 ms | Total  18.73 ms
+CUDA    : Saddle   0.49 ms (±0.06) | Harmonic  0.70 ms | Total   1.19 ms
+C++     : Saddle   1.08 ms (±0.20) | Harmonic  0.75 ms | Total   1.82 ms
+Python  : Saddle  16.04 ms (±0.31) | Harmonic  0.72 ms | Total  16.76 ms
 ========================================
 ```
 
 - **CUDA Solver (`solvers/cuda`)**: The fastest raw execution time (~0.5ms). However, it requires an NVIDIA GPU and incurs a one-time ~100ms CUDA context initialization penalty on the first run, this would be the best choice for real-time use cases.
-- **C++ CPU Solver (`solvers/cpp`)**: An OpenMP multi-threaded CPU implementation. It's faster (~1ms) than the Python solver without lower initialization overhead.
+- **C++ CPU Solver (`solvers/cpp`)**: An OpenMP multi-threaded CPU implementation. It's faster (~ms) than the Python solver with lower initialization overhead.
 - **Python Solver (`solvers/python`)**: The default, highly-portable OpenCV implementation. It runs entirely in Python (besides using OpenCV) and takes (~17ms).
 - **WebGPU Solver (`web/`)**: A purely client-side browser implementation that uses custom `WGSL` compute shaders for saddle detection and a JavaScript port of the harmonic solver. It achieves high performance natively in the browser without any server backend.
 

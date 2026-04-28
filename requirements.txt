@@ -2,5 +2,3 @@ numpy
 opencv-python
 matplotlib
 Pillow
-scikit-image
-scipy
